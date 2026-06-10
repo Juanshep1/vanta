@@ -76,6 +76,9 @@ let total be 0
 change total to total + 10
 say 2 plus 3            # words or symbols, both fine: 2 + 3 also works
 say 10 % 3              # remainder
+
+let a, b be [1, 2]      # unpack a list into several names
+change a, b to b, a     # swap, all at once
 ```
 
 ### Decisions
@@ -171,13 +174,13 @@ checked with `is a`:
 ```
 type Puppy from Dog
     to speak()
-        give back me.name + " yips"
+        give back super.speak() + ", but tiny"     # super reaches Dog's version
     end
 end
 
-let pup be new Puppy("Tiny", "yip")
-say pup is a Dog              # yes  (inheritance)
-say pup is an Animal          # depends on the chain
+let pup be new Puppy("Tiny", "Yip")
+say pup.speak()              # Tiny says Yip, but tiny
+say pup is a Dog             # yes  (inheritance)
 ```
 
 ### Comprehensions and regular expressions
@@ -185,6 +188,7 @@ say pup is an Animal          # depends on the chain
 let nums be [1, 2, 3, 4, 5]
 say [n * n for each n in nums]               # [1, 4, 9, 16, 25]
 say [n for each n in nums if n % 2 is 0]     # [2, 4]
+say { n: n * n for each n in nums }          # a map of each number to its square
 
 say matches("abc123", "[0-9]+")              # yes
 say find_all("cat hat bat", "[a-z]at")       # ["cat", "hat", "bat"]
@@ -289,26 +293,12 @@ python3 run_tests.py
 This runs the assertion-based tests in `tests/` and then runs every example to
 make sure nothing crashes.
 
-## Known limitations
-
-I'd rather be upfront about these than pretend they don't exist:
-
-- It's a tree-walking interpreter, so it's not fast. Fine for scripts and
-  learning, not for number-crunching.
-- Strings are single-line (escapes like `\n` work, but a string can't span
-  source lines), and every string interpolates — use `{{` for a literal brace.
-- Indexing is 0-based; `first(list)` and `last(list)` help if that trips you up.
-- Inheritance is single-parent with method override, but there's no `super`
-  to call the parent's version of a method yet.
-- The standard library covers a lot of ground but is nowhere near Python's. The
-  *language* is real; the *ecosystem* is young.
-
 ## What's next
 
-- A `super` call so an override can reach the parent method
-- Map comprehensions and multiple assignment
-- A package system so modules can be shared
+- A package system so modules can be shared and versioned
 - A browser playground so you can try it with nothing installed
+- A bytecode compiler for more speed
+- More of the standard library
 
 ## Why I built it
 

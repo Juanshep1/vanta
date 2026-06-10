@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.2
+- `super` calls so an overriding method can reach the parent's version
+- Multiple assignment and swapping (`let a, b be [1, 2]`, `change a, b to b, a`)
+- Map comprehensions (`{ n: n * n for each n in nums }`)
+
 ## 3.1
 - Type inheritance with `type Child from Parent`, method override, and the
   `is a` / `is an` type check (plus an `is_a` builtin)

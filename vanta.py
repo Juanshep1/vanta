@@ -299,7 +299,7 @@ class Parser:
         if k == "LB":
             return self.parse_list_or_comprehension()
         if k == "LC":
-            return ("map", self.parse_map())
+            return self.parse_map_or_comprehension()
         raise VantaError("that line is missing a value somewhere")
 
     def parse_list_or_comprehension(self):
@@ -347,21 +347,42 @@ class Parser:
             if k != "COMMA":
                 raise VantaError("expected a comma between values")
 
-    def parse_map(self):
-        pairs = []
+    def parse_map_or_comprehension(self):
         if self.peek()[0] == "RC":
             self.take()
-            return pairs
+            return ("map", [])
+        key = self.parse_expression()
+        self.expect("COLON", "a map needs a : between key and value")
+        value = self.parse_expression()
+        if self.is_word("for"):              # {KEY: VALUE for each NAME in LIST if COND}
+            self.take()
+            if not self.is_word("each"):
+                raise VantaError("a map comprehension reads {KEY: VALUE for each NAME in LIST}")
+            self.take()
+            k, name = self.take()
+            if k != "NAME":
+                raise VantaError("expected a name after 'for each'")
+            if not self.is_word("in"):
+                raise VantaError("a comprehension needs 'in' before the list")
+            self.take()
+            iter_expr = self.parse_expression()
+            cond = None
+            if self.is_word("if"):
+                self.take()
+                cond = self.parse_expression()
+            self.expect("RC", "a closing } is missing")
+            return ("mapcomp", key, value, name, iter_expr, cond)
+        pairs = [(key, value)]
         while True:
+            k = self.take()[0]
+            if k == "RC":
+                return ("map", pairs)
+            if k != "COMMA":
+                raise VantaError("expected a comma between map entries")
             key = self.parse_expression()
             self.expect("COLON", "a map needs a : between key and value")
             value = self.parse_expression()
             pairs.append((key, value))
-            k = self.take()[0]
-            if k == "RC":
-                return pairs
-            if k != "COMMA":
-                raise VantaError("expected a comma between map entries")
 
     def expect(self, kind, message):
         if self.take()[0] != kind:
@@ -438,6 +459,32 @@ def first_word(line):
     return line.split(" ", 1)[0] if line else ""
 
 
+def split_top_level(text, sep):
+    """Split on sep, but not inside (), [], {} or "strings"."""
+    parts, cur, depth, in_str = [], [], 0, False
+    for c in text:
+        if in_str:
+            cur.append(c)
+            if c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+            cur.append(c)
+        elif c in "([{":
+            depth += 1
+            cur.append(c)
+        elif c in ")]}":
+            depth -= 1
+            cur.append(c)
+        elif c == sep and depth == 0:
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(c)
+    parts.append("".join(cur))
+    return parts
+
+
 def parse_program(lines):
     stmts, pos = parse_block(lines, 0)
     if pos != len(lines):
@@ -508,17 +555,30 @@ def parse_one(lines, pos):
         return ("return", lineno, node), pos + 1
 
     if head == "let":
-        name, sep, expr_text = rest.partition(" be ")
+        name_part, sep, expr_text = rest.partition(" be ")
         if not sep:
             raise VantaError(f"line {lineno}: use: let NAME be VALUE")
-        check_name(name.strip(), lineno)
-        return ("let", lineno, name.strip(), parse_expr_text(expr_text, lineno)), pos + 1
+        names = [t.strip() for t in split_top_level(name_part, ",")]
+        if len(names) > 1:
+            for nm in names:
+                check_name(nm, lineno)
+            value_nodes = [parse_expr_text(s.strip(), lineno)
+                           for s in split_top_level(expr_text, ",")]
+            return ("let_multi", lineno, names, value_nodes), pos + 1
+        check_name(names[0], lineno)
+        return ("let", lineno, names[0], parse_expr_text(expr_text, lineno)), pos + 1
 
     if head == "change":
         if " to " not in rest:
             raise VantaError(f"line {lineno}: use: change NAME to VALUE")
         target, _, value_text = rest.partition(" to ")
         target = target.strip()
+        target_segs = split_top_level(target, ",")
+        if len(target_segs) > 1:
+            target_nodes = [parse_expr_text(s.strip(), lineno) for s in target_segs]
+            value_nodes = [parse_expr_text(s.strip(), lineno)
+                           for s in split_top_level(value_text, ",")]
+            return ("assign_multi", lineno, target_nodes, value_nodes), pos + 1
         value = parse_expr_text(value_text, lineno)
         if " at " in target and "[" not in target and "." not in target:
             name, _, index_text = target.partition(" at ")
@@ -664,6 +724,7 @@ class Function:
         self.name = name
         self.params = params          # list of (name, default_node_or_None)
         self.body = body
+        self.owner = None             # the type a method was defined in (for super)
 
 
 class Builtin:
@@ -690,6 +751,14 @@ class BoundMethod:
     def __init__(self, inst, fn):
         self.inst = inst
         self.fn = fn
+
+
+class SuperProxy:
+    """What 'super' resolves to inside a method: lets you call the parent's
+    version of a method, bound to the same object."""
+    def __init__(self, inst, parent_type):
+        self.inst = inst
+        self.parent_type = parent_type
 
 
 _MISSING = object()
@@ -762,6 +831,16 @@ def _run_stmt(stmt, env):
     elif tag == "assign":
         do_assign(stmt[2], eval_expr(stmt[3], env), env)
 
+    elif tag == "let_multi":
+        names, value_nodes = stmt[2], stmt[3]
+        for nm, val in zip(names, eval_value_group(value_nodes, len(names), env)):
+            env.define(nm, val)
+
+    elif tag == "assign_multi":
+        targets, value_nodes = stmt[2], stmt[3]
+        for tnode, val in zip(targets, eval_value_group(value_nodes, len(targets), env)):
+            do_assign(tnode, val, env)
+
     elif tag == "append":
         value = eval_expr(stmt[2], env)
         target = eval_expr(stmt[3], env)
@@ -819,20 +898,24 @@ def _run_stmt(stmt, env):
         env.define(name, Function(name, params, body))
 
     elif tag == "type":
-        _, _, name, parent_name, fields, methods = stmt
+        _, _, name, parent_name, fields, own_methods = stmt
         parent = None
+        final_fields = list(fields)
+        final_methods = dict(own_methods)
         if parent_name is not None:
             parent = env.get(parent_name)
             if not isinstance(parent, VantaType):
                 raise VantaError(f"'{parent_name}' is not a type to inherit from")
-            merged_fields = list(parent.fields)
+            final_fields = list(parent.fields)
             for field in fields:
-                if field not in merged_fields:
-                    merged_fields.append(field)
-            merged_methods = dict(parent.methods)
-            merged_methods.update(methods)
-            fields, methods = merged_fields, merged_methods
-        env.define(name, VantaType(name, fields, methods, parent))
+                if field not in final_fields:
+                    final_fields.append(field)
+            final_methods = dict(parent.methods)
+            final_methods.update(own_methods)
+        vtype = VantaType(name, final_fields, final_methods, parent)
+        for method in own_methods.values():     # remember where each was defined
+            method.owner = vtype
+        env.define(name, vtype)
 
     elif tag == "attempt":
         _, _, body, errname, rescue_body = stmt
@@ -938,6 +1021,16 @@ def eval_expr(node, env):
                 result.append(eval_expr(out_expr, loop_env))
         return result
 
+    if tag == "mapcomp":
+        _, key_expr, val_expr, var, iter_expr, cond = node
+        loop_env = Environment(env)
+        result = {}
+        for item in iterate(eval_expr(iter_expr, env)):
+            loop_env.define(var, item)
+            if cond is None or truthy(eval_expr(cond, loop_env)):
+                result[eval_expr(key_expr, loop_env)] = eval_expr(val_expr, loop_env)
+        return result
+
     if tag == "arith":
         return arithmetic(node[1], eval_expr(node[2], env), eval_expr(node[3], env))
 
@@ -1009,6 +1102,8 @@ def call_function(fn, args):
 def call_method(inst, fn, args):
     local = Environment(GLOBAL_ENV)
     local.define("me", inst)
+    parent_type = fn.owner.parent if getattr(fn, "owner", None) else None
+    local.define("super", SuperProxy(inst, parent_type))
     bind_params(f"'{fn.name}'", fn.params, args, local)
     try:
         run_block(fn.body, local)
@@ -1042,6 +1137,13 @@ def is_instance_of(value, vtype):
 
 
 def get_attr(obj, attr):
+    if isinstance(obj, SuperProxy):
+        if obj.parent_type is None:
+            raise VantaError("there is no parent type to reach with 'super'")
+        method = obj.parent_type.methods.get(attr)
+        if method is None:
+            raise VantaError(f"the parent type has no '{attr}'")
+        return BoundMethod(obj.inst, method)
     if isinstance(obj, VantaInstance):
         if attr in obj.attrs:
             return obj.attrs[attr]
@@ -1056,6 +1158,21 @@ def set_attr(obj, attr, value):
         obj.attrs[attr] = value
         return
     raise VantaError("you can only set a '.' field on an object made from a type")
+
+
+def eval_value_group(value_nodes, count, env):
+    """Resolve the right-hand side of a multiple assignment into `count`
+    values. One list value gets unpacked; several values are taken as-is."""
+    if len(value_nodes) == 1:
+        value = eval_expr(value_nodes[0], env)
+        if not isinstance(value, list):
+            raise VantaError("to unpack into several names, the value must be a list")
+        if len(value) != count:
+            raise VantaError(f"expected {count} values but the list has {len(value)}")
+        return list(value)
+    if len(value_nodes) != count:
+        raise VantaError(f"there are {count} names but {len(value_nodes)} values")
+    return [eval_expr(node, env) for node in value_nodes]
 
 
 def do_assign(target, value, env):
@@ -1893,7 +2010,7 @@ RESERVED = {"if", "end", "otherwise", "repeat", "while", "for", "each", "in",
             "to", "give", "back", "say", "let", "change", "ask", "stop",
             "skip", "import", "is", "be", "and", "or", "not", "yes", "no",
             "nothing", "times", "at", "type", "has", "attempt", "rescue", "new",
-            "from"}
+            "from", "super"}
 
 
 def check_name(name, lineno):
