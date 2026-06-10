@@ -1,0 +1,20 @@
+# Error handling: attempt / rescue, with fail() to raise your own errors.
+
+to parse_age(value)
+    let n be number(value)        # fails if it isn't a number
+    if n is under 0
+        fail("age can't be negative")
+    end
+    give back n
+end
+
+let inputs be ["25", "-4", "hello"]
+
+for each value in inputs
+    attempt
+        let age be parse_age(value)
+        say "{value} -> age {age}"
+    rescue problem
+        say "{value} -> error: {problem}"
+    end
+end

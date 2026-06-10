@@ -1,0 +1,36 @@
+# Objects: define your own types with fields and methods.
+
+type Account
+    has owner
+    has balance
+    to setup(owner)
+        change me.owner to owner
+        change me.balance to 0
+    end
+    to deposit(amount)
+        change me.balance to me.balance + amount
+    end
+    to withdraw(amount)
+        if amount is over me.balance
+            fail(me.owner + " only has " + me.balance)
+        end
+        change me.balance to me.balance - amount
+    end
+    to show()
+        give back me.owner + "'s account: " + me.balance
+    end
+end
+
+let acc be new Account("Juan")
+acc.deposit(100)
+acc.deposit(50)
+acc.withdraw(30)
+
+say acc                          # the show method controls how it prints
+say "Balance is {acc.balance}"
+
+attempt
+    acc.withdraw(1000)
+rescue problem
+    say "Blocked: {problem}"
+end

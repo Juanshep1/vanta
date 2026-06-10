@@ -1,0 +1,28 @@
+# Higher-order functions: functions are values you can pass around.
+
+to square(n)
+    give back n * n
+end
+
+to is_big(n)
+    give back n is over 10
+end
+
+to is_odd(n)
+    give back n % 2 is 1
+end
+
+to add_up(a, b)
+    give back a + b
+end
+
+let nums be [1, 2, 3, 4, 5]
+
+say "squares:     {to_json(map(square, nums))}"
+say "squares >10: {to_json(keep(is_big, map(square, nums)))}"
+say "sum:         {reduce(add_up, nums, 0)}"
+say "odd count:   {count_where(is_odd, nums)}"
+say "first odd:   {find_where(is_odd, nums)}"
+
+# builtins are first-class too
+say "uppercased:  {to_json(map(uppercase, [\"a\", \"b\", \"c\"]))}"
