@@ -1,0 +1,17 @@
+# Using the standard library. These modules live in lib/ and are found
+# automatically by name.
+
+import "text"
+import "lists"
+import "math"
+
+say title_case("the quick brown fox")
+say "x" + repeat_text("-", 10) + "x"
+
+say "sum:     {sum([1, 2, 3, 4, 5])}"
+say "average: {average([2, 4, 6])}"
+say "unique:  {to_json(unique([1, 1, 2, 3, 3, 3]))}"
+
+say "gcd(12, 18): {gcd(12, 18)}"
+say "10!:         {factorial(10)}"
+say "primes < 20: {to_json(keep(is_prime, range(2, 20)))}"

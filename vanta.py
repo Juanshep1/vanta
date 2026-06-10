@@ -28,6 +28,8 @@ import math
 import subprocess
 import random
 
+VERSION = "3.3"
+
 # Command-line arguments passed to a Vanta program (after the script name).
 PROGRAM_ARGS = []
 
@@ -2034,12 +2036,39 @@ def load_lines(source):
     return lines
 
 
-def import_file(path):
+IMPORTED = set()
+
+
+def resolve_import(name):
+    """Find a module by name. Search order: the path as given (so existing
+    relative imports keep working), then the bundled standard library in
+    lib/, then installed packages in ~/.vanta/packages/."""
+    with_ext = name if name.endswith(".va") else name + ".va"
+    here = os.path.dirname(os.path.abspath(__file__))
+    packages = os.path.join(os.path.expanduser("~"), ".vanta", "packages")
+    candidates = [
+        name,
+        with_ext,
+        os.path.join(here, "lib", with_ext),
+        os.path.join(packages, with_ext),
+        os.path.join(packages, name, "main.va"),
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    raise VantaError(f"could not find a module named '{name}'")
+
+
+def import_file(name):
+    path = os.path.abspath(resolve_import(name))
+    if path in IMPORTED:          # each module loads at most once
+        return
+    IMPORTED.add(path)
     try:
         with open(path, "r") as f:
             source = f.read()
     except OSError as e:
-        raise VantaError(f"could not import {path}: {e}")
+        raise VantaError(f"could not import {name}: {e}")
     run_block(parse_program(load_lines(source)), GLOBAL_ENV)
 
 
@@ -2057,7 +2086,7 @@ def run_source(source):
 
 
 def repl():
-    print("Vanta 3.0 - type Vanta code, or 'bye' to quit.")
+    print(f"Vanta {VERSION} - type Vanta code, or 'bye' to quit.")
     buffer, depth = [], 0
     while True:
         try:
@@ -2089,14 +2118,49 @@ def repl():
                 print("Oops! 'give back' only works inside a function")
 
 
+USAGE = """\
+Vanta - a plain-English programming language.
+
+  vanta program.va [args]   run a program
+  vanta run program.va      run a program (explicit form)
+  vanta repl                start the interactive REPL
+  vanta version             print the version
+  vanta help                show this message
+"""
+
+
 def main():
     global PROGRAM_ARGS
-    if len(sys.argv) == 1:
+    args = sys.argv[1:]
+
+    if not args:
         repl()
         return
-    PROGRAM_ARGS = sys.argv[2:]
-    with open(sys.argv[1], "r") as f:
-        source = f.read()
+
+    command = args[0]
+    if command in ("help", "--help", "-h"):
+        print(USAGE)
+        return
+    if command in ("version", "--version", "-v"):
+        print(f"Vanta {VERSION}")
+        return
+    if command == "repl":
+        repl()
+        return
+    if command == "run":
+        if len(args) < 2:
+            print("Usage: vanta run program.va")
+            sys.exit(1)
+        path, PROGRAM_ARGS = args[1], args[2:]
+    else:
+        path, PROGRAM_ARGS = args[0], args[1:]
+
+    try:
+        with open(path, "r") as f:
+            source = f.read()
+    except OSError as e:
+        print(f"Oops! could not open {path}: {e}")
+        sys.exit(1)
     try:
         run_source(source)
     except VantaError as e:

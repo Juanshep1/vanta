@@ -61,9 +61,14 @@ You need Python 3.8+ and nothing else — no packages to install.
 ```bash
 git clone https://github.com/Juanshep1/vanta.git
 cd vanta
-python3 vanta.py examples/hello.va     # run a program
-python3 vanta.py                       # or start the REPL
+./vanta run examples/hello.va     # run a program
+./vanta repl                      # start the interactive REPL
+./vanta version                   # 3.3
 ```
+
+`./vanta program.va` works too, and so does `python3 vanta.py program.va` if you
+don't want to use the launcher. Put the `vanta` directory on your `PATH` and you
+can just type `vanta` anywhere (`vanta.bat` is there for Windows).
 
 ## A quick tour
 
@@ -225,8 +230,25 @@ This is what makes Vanta useful for real scripts:
 write_file("note.txt", "hello")
 say read_file("note.txt")
 say run("ls -la")            # run a shell command, get its output
-import "tools.va"            # pull in functions from another file
 ```
+
+### Modules and the standard library
+`import` runs another file's definitions into your program. It looks for the
+file as given, then in Vanta's bundled library (`lib/`), then in installed
+packages under `~/.vanta/packages/` — so you can import by plain name:
+
+```
+import "math"                # finds lib/math.va
+import "lists"
+import "./my_helpers.va"     # or a path of your own
+
+say sum([1, 2, 3, 4])        # from lib/lists.va
+say factorial(10)            # from lib/math.va
+```
+
+The bundled library (`lib/`) ships `text`, `lists`, and `math` modules, all
+written in Vanta. To publish your own, drop a `.va` file (or a folder with a
+`main.va`) into `~/.vanta/packages/` and import it by name.
 
 ## Standard library
 
@@ -280,6 +302,7 @@ The `examples/` folder has a working program for each feature:
 | `shapes.va` | inheritance, polymorphism, and comprehensions |
 | `higher_order.va` | `map` / `keep` / `reduce` and passing functions |
 | `errors.va` | `attempt` / `rescue` and `fail` |
+| `using_lib.va` | importing the bundled standard library |
 | `guess.va` | a number-guessing game |
 
 There's also a longer write-up in [`docs/LANGUAGE_GUIDE.md`](docs/LANGUAGE_GUIDE.md).
@@ -295,9 +318,9 @@ make sure nothing crashes.
 
 ## What's next
 
-- A package system so modules can be shared and versioned
 - A browser playground so you can try it with nothing installed
 - A bytecode compiler for more speed
+- A way to fetch and install community packages
 - More of the standard library
 
 ## Why I built it

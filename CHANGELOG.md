@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.3
+- A `vanta` command-line tool: `vanta run`, `vanta repl`, `vanta version`,
+  `vanta help` (plus `vanta program.va` and the old `python3 vanta.py`)
+- A module search path: `import "name"` finds the bundled library in `lib/`
+  and installed packages in `~/.vanta/packages/`; modules load at most once
+- A standard library written in Vanta: `text`, `lists`, and `math` modules
+
 ## 3.2
 - `super` calls so an overriding method can reach the parent's version
 - Multiple assignment and swapping (`let a, b be [1, 2]`, `change a, b to b, a`)
