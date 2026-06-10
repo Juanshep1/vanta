@@ -14,10 +14,12 @@ language? The whole thing is a single Python file (`vanta.py`) — a tokenizer, 
 parser, and a tree-walking interpreter — and you can read the entire language in
 an afternoon.
 
-It started as a toy. It isn't one anymore. Vanta has functions and recursion,
-lists and maps, file access, the ability to shell out to the system, modules,
-an interactive REPL, and a standard library. If you can write it in a scripting
-language, you can mostly write it in Vanta.
+It started as a toy. It isn't one anymore. Vanta has functions with default
+arguments and recursion, first-class and higher-order functions, user-defined
+types with methods, error handling, lists and maps, string interpolation, file
+and system access, modules, an interactive REPL, and a standard library of about
+sixty functions. There's a test suite in `tests/`. If you can write it in a
+scripting language, you can mostly write it in Vanta.
 
 Here's what it looks like:
 
@@ -108,14 +110,69 @@ end
 `stop` breaks out of a loop, `skip` jumps to the next round.
 
 ### Functions
-Define with `to`, return with `give back`, call with `name(args)`:
+Define with `to`, return with `give back`, call with `name(args)`. Parameters
+can have defaults, and functions are values you can pass around:
 
 ```
-to greet(who)
-    say "Hello, " + who
+to greet(who, greeting be "Hello")     # greeting has a default
+    give back greeting + ", " + who
 end
 
-greet("world")
+say greet("world")            # Hello, world
+say greet("world", "Hey")     # Hey, world
+```
+
+### Strings that fill themselves in
+Anything in `{curly braces}` inside a string is evaluated and dropped in (use
+`{{` and `}}` for literal braces):
+
+```
+let name be "Juan"
+say "Hello {name}, you'll be {25 + 1} next year."
+```
+
+### Higher-order functions
+`map`, `keep` (filter), `reduce`, `each`, `count_where`, `find_where`, and
+`sort_by` all take a function. Your own functions and the builtins both work:
+
+```
+to square(n)
+    give back n * n
+end
+
+say map(square, [1, 2, 3])          # [1, 4, 9]
+say keep(is_number, [1, "a", 2])    # [1, 2]
+say map(uppercase, ["a", "b"])      # ["A", "B"]
+```
+
+### Your own types
+Define a type with fields (`has`) and methods (`to`). Inside a method, `me`
+refers to the object. A `setup` method runs when you build one; a `show` method
+controls how it prints:
+
+```
+type Dog
+    has name
+    has sound
+    to speak()
+        give back me.name + " says " + me.sound
+    end
+end
+
+let d be new Dog("Rex", "Woof")
+say d.speak()                 # Rex says Woof
+change d.name to "Max"
+```
+
+### Handling errors
+Wrap risky code in `attempt` / `rescue`, and raise your own with `fail`:
+
+```
+attempt
+    let x be 10 / 0
+rescue problem
+    say "That went wrong: {problem}"
+end
 ```
 
 ### Lists and maps
@@ -142,13 +199,18 @@ import "tools.va"            # pull in functions from another file
 
 ## Standard library
 
-`length` `text` `number` `uppercase` `lowercase` `trim` `replace`
-`starts_with` `ends_with` `find` `split` `join` `lines` `first` `last`
-`slice` `reverse` `sort` `range` `contains` `keys` `remove_at`
-`abs` `round` `floor` `ceil` `min` `max` `random` `now`
-`read_file` `write_file` `run` `shell` `arguments` `env`
-`make_dir` `remove_path` `list_dir` `path_exists` `copy_path`
-`to_json` `from_json`
+```
+text:     length text number uppercase lowercase trim replace starts_with
+          ends_with find split lines pad_left pad_right join
+numbers:  abs round floor ceil sqrt power min max random now
+lists:    first last range contains keys values sort reverse slice push pop
+          remove_at
+higher:   map keep reduce each count_where find_where sort_by
+types:    type_of is_number is_text is_list is_map is_function is_nothing
+errors:   fail assert
+system:   read_file write_file run shell arguments env make_dir remove_path
+          list_dir path_exists copy_path to_json from_json interpreter
+```
 
 ## How it works
 
@@ -180,30 +242,41 @@ The `examples/` folder has a working program for each feature:
 | `maps.va` | key/value maps |
 | `mathtools.va` + `app.va` | a module and a program that imports it |
 | `system.va` | files and shell commands |
+| `objects.va` | a type with fields, methods, and `show` |
+| `higher_order.va` | `map` / `keep` / `reduce` and passing functions |
+| `errors.va` | `attempt` / `rescue` and `fail` |
 | `guess.va` | a number-guessing game |
 
 There's also a longer write-up in [`docs/LANGUAGE_GUIDE.md`](docs/LANGUAGE_GUIDE.md).
 
-## Known rough edges
+## Tests
+
+```bash
+python3 run_tests.py
+```
+
+This runs the assertion-based tests in `tests/` and then runs every example to
+make sure nothing crashes.
+
+## Known limitations
 
 I'd rather be upfront about these than pretend they don't exist:
 
-- Strings are single-line. Escapes (`\n`, `\t`, `\"`, `\\`) work, but a string
-  can't span multiple source lines.
-- Indexing is 0-based (like most languages), which trips up beginners who expect
-  position 1 to be the first item. `first(list)` and `last(list)` help.
-- No classes or objects yet — maps cover most of what you'd reach for them.
 - It's a tree-walking interpreter, so it's not fast. Fine for scripts and
   learning, not for number-crunching.
-- The standard library is young. The *language* is real; the *ecosystem* isn't
-  there yet.
+- Strings are single-line (escapes like `\n` work, but a string can't span
+  source lines), and every string interpolates — use `{{` for a literal brace.
+- Indexing is 0-based; `first(list)` and `last(list)` help if that trips you up.
+- No inheritance — types have fields and methods but don't extend each other.
+- The standard library covers the basics but is nowhere near Python's. The
+  *language* is real; the *ecosystem* is young.
 
 ## What's next
 
-- String formatting / interpolation
+- Type inheritance and a way to check "is this a Dog?"
 - A package system so modules can be shared
 - A browser playground so you can try it with nothing installed
-- More of the standard library (dates, math, simple HTTP)
+- More of the standard library (dates, regular expressions, simple HTTP)
 
 ## Why I built it
 
