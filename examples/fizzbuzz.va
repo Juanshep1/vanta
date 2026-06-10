@@ -1,0 +1,19 @@
+# The classic FizzBuzz, in plain English.
+# Count 1..15. Say Fizz for multiples of 3, Buzz for 5, FizzBuzz for both.
+let n be 1
+while n is at most 15
+    if n % 15 is 0
+        say "FizzBuzz"
+    otherwise
+        if n % 3 is 0
+            say "Fizz"
+        otherwise
+            if n % 5 is 0
+                say "Buzz"
+            otherwise
+                say n
+            end
+        end
+    end
+    change n to n plus 1
+end

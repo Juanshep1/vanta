@@ -1,0 +1,8 @@
+# Modules: pull in functions from another file with 'import'
+
+import "examples/mathtools.va"
+
+say "double(21) = " + double(21)
+say "is 10 even? " + is_even(10)
+say "is 7 even?  " + is_even(7)
+say "biggest of [4, 9, 2, 7] = " + biggest([4, 9, 2, 7])

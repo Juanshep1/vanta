@@ -1,0 +1,9 @@
+# Your very first Vanta program
+say "Hello, world!"
+
+# Variables: 'let NAME be VALUE'
+let name be "Juan"
+let age be 25
+
+say "My name is " + name
+say "Next year I will be " + (age plus 1)

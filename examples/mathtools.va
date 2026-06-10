@@ -1,0 +1,20 @@
+# A reusable module. Other programs can 'import' this file
+# to use the functions defined here.
+
+to double(n)
+    give back n * 2
+end
+
+to is_even(n)
+    give back n % 2 is 0
+end
+
+to biggest(numbers)
+    let best be first(numbers)
+    for each n in numbers
+        if n is over best
+            change best to n
+        end
+    end
+    give back best
+end

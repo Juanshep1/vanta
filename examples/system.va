@@ -1,0 +1,19 @@
+# Vanta can touch the real world: files and system commands.
+# This is what lets us build real tools (like Harbor) in Vanta.
+
+# Write a file, then read it back
+write_file("note.txt", "Hello from Vanta!")
+let contents be read_file("note.txt")
+say "The file says: " + contents
+
+# Run a real system command and capture its output
+let here be run("pwd")
+say "I am running in: " + here
+
+let files be run("ls")
+say "Files here:"
+say files
+
+# Clean up
+run("rm note.txt")
+say "Done."

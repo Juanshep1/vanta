@@ -1,0 +1,13 @@
+# Loops: 'repeat N times' and 'while CONDITION'
+say "Counting up with repeat:"
+repeat 3 times
+    say "hello"
+end
+
+say "Counting down with while:"
+let count be 5
+while count is over 0
+    say count
+    change count to count minus 1
+end
+say "Blast off!"

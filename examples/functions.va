@@ -1,0 +1,27 @@
+# Functions: define with 'to', return with 'give back', call with name(args)
+
+to greet(name)
+    say "Hello, " + name + "!"
+end
+
+to add(a, b)
+    give back a + b
+end
+
+# Functions can call themselves (recursion)
+to factorial(n)
+    if n is at most 1
+        give back 1
+    end
+    give back n * factorial(n minus 1)
+end
+
+greet("Juan")
+say "3 + 4 = " + add(3, 4)
+say "5! = " + factorial(5)
+
+# You can also define with the word 'with' instead of parentheses
+to area with width, height
+    give back width * height
+end
+say "Area of 3 by 4 = " + area(3, 4)
