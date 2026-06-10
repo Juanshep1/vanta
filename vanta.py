@@ -2,9 +2,11 @@
 """
 Vanta - a real, plain-English programming language.
 
-Vanta reads like English but is a genuine general-purpose language:
-functions, recursion, lists, maps, loops, logic, file access, the ability to
-run system commands, modules, and a standard library of built-in functions.
+Vanta reads like English but is a genuine general-purpose language. It has
+variables, arithmetic, the full set of control flow, functions with default
+arguments and recursion, first-class and higher-order functions, user-defined
+types with methods, error handling, lists and maps, string interpolation,
+modules, file and system access, and a sizeable standard library.
 
 The whole language is this one file, built in the three classic stages:
 
@@ -72,6 +74,9 @@ def tokenize(text):
             i += 1
             continue
 
+        if c == "#":            # rest of the line is a comment
+            break
+
         if c == '"':
             j = i + 1
             chars = []
@@ -112,7 +117,7 @@ def tokenize(text):
             tokens.append(("OP", two))
             i += 2
             continue
-        if c in "+-*/%><":
+        if c in "+-*/%><^":
             tokens.append(("OP", c))
             i += 1
             continue
@@ -120,8 +125,8 @@ def tokenize(text):
             tokens.append(("OP", "=="))
             i += 1
             continue
-        simple = {"(": "LP", ")": "RP", "[": "LB", "]": "RB",
-                  "{": "LC", "}": "RC", ",": "COMMA", ":": "COLON"}
+        simple = {"(": "LP", ")": "RP", "[": "LB", "]": "RB", "{": "LC",
+                  "}": "RC", ",": "COMMA", ":": "COLON", ".": "DOT"}
         if c in simple:
             tokens.append((simple[c], c))
             i += 1
@@ -161,8 +166,8 @@ def combine_word_operators(tokens):
 # ===========================================================================
 #
 # Precedence, lowest to highest:
-#   or  ->  and  ->  not  ->  comparison  ->  + -  ->  * / %  ->  unary -
-#   ->  call()/index[]  ->  primary (number, text, name, list, map, group)
+#   or -> and -> not -> comparison -> + - -> * / % -> unary - / new -> ^
+#   -> call() / index[] / .attr -> primary
 
 class Parser:
     def __init__(self, tokens):
@@ -233,27 +238,45 @@ class Parser:
         if self.peek() == ("OP", "-"):
             self.take()
             return ("neg", self.parse_unary())
-        return self.parse_postfix()
+        if self.is_word("new"):           # "new Dog(...)" is sugar for "Dog(...)"
+            self.take()
+            return self.parse_power()
+        return self.parse_power()
+
+    def parse_power(self):
+        base = self.parse_postfix()
+        if self.peek() == ("OP", "^"):
+            self.take()
+            return ("arith", "^", base, self.parse_unary())   # right-associative
+        return base
 
     def parse_postfix(self):
         node = self.parse_primary()
         while True:
-            if self.peek()[0] == "LP":
+            kind = self.peek()[0]
+            if kind == "LP":
                 self.take()
-                args = self.parse_list_until("RP")
-                node = ("call", node, args)
-            elif self.peek()[0] == "LB":
+                node = ("call", node, self.parse_list_until("RP"))
+            elif kind == "LB":
                 self.take()
                 index = self.parse_expression()
                 self.expect("RB", "a closing ] is missing")
                 node = ("index", node, index)
+            elif kind == "DOT":
+                self.take()
+                k, v = self.take()
+                if k != "NAME":
+                    raise VantaError("expected a name after '.'")
+                node = ("getattr", node, v)
             else:
                 return node
 
     def parse_primary(self):
         k, v = self.take()
-        if k == "NUM" or k == "STR":
+        if k == "NUM":
             return ("lit", v)
+        if k == "STR":
+            return build_string_node(v)
         if k == "NAME":
             low = v.lower()
             if low in ("yes", "true"):
@@ -307,6 +330,52 @@ class Parser:
             raise VantaError(message)
 
 
+def build_string_node(text):
+    """Turn a string that may contain {expressions} into either a plain
+    literal or a 'format' node that concatenates pieces at runtime.
+    Use {{ and }} for literal braces."""
+    if "{" not in text and "}" not in text:
+        return ("lit", text)
+    parts, buf = [], []
+    has_expr = False
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "{" and i + 1 < n and text[i + 1] == "{":
+            buf.append("{")
+            i += 2
+        elif ch == "}" and i + 1 < n and text[i + 1] == "}":
+            buf.append("}")
+            i += 2
+        elif ch == "}":
+            raise VantaError("a '}' in text has no matching '{' (use '}}' for a literal)")
+        elif ch == "{":
+            parts.append(("lit", "".join(buf)))
+            buf = []
+            j = i + 1
+            while j < n and text[j] != "}":
+                j += 1
+            if j >= n:
+                raise VantaError("a '{' in text is missing its '}' (use '{{' for a literal)")
+            src = text[i + 1:j].strip()
+            if not src:
+                raise VantaError("there is an empty {} in text")
+            sub = Parser(tokenize(src))
+            node = sub.parse_expression()
+            if not sub.at_end():
+                raise VantaError("I got confused inside { } in text")
+            parts.append(node)
+            has_expr = True
+            i = j + 1
+        else:
+            buf.append(ch)
+            i += 1
+    parts.append(("lit", "".join(buf)))
+    if not has_expr:
+        return ("lit", "".join(p[1] for p in parts))
+    return ("format", parts)
+
+
 def parse_expr_text(text, lineno):
     try:
         parser = Parser(tokenize(text))
@@ -323,8 +392,8 @@ def parse_expr_text(text, lineno):
 # STAGE 2b - STATEMENT PARSER  (lines -> list of statements)
 # ===========================================================================
 
-BLOCK_TERMINATORS = ("end", "otherwise")
-BLOCK_OPENERS = ("if", "repeat", "while", "for", "to")
+BLOCK_TERMINATORS = ("end", "otherwise", "rescue")
+BLOCK_OPENERS = ("if", "repeat", "while", "for", "to", "attempt", "type")
 
 
 def first_word(line):
@@ -387,6 +456,12 @@ def parse_one(lines, pos):
         pos = expect_end(lines, pos, "to")
         return ("func", lineno, name, params, body), pos
 
+    if head == "type":
+        return parse_type(lines, pos)
+
+    if head == "attempt":
+        return parse_attempt(lines, pos)
+
     if head == "give":
         if not rest.startswith("back"):
             raise VantaError(f"line {lineno}: did you mean 'give back ...'?")
@@ -405,12 +480,15 @@ def parse_one(lines, pos):
         if " to " not in rest:
             raise VantaError(f"line {lineno}: use: change NAME to VALUE")
         target, _, value_text = rest.partition(" to ")
+        target = target.strip()
         value = parse_expr_text(value_text, lineno)
-        if " at " in target:
+        if " at " in target and "[" not in target and "." not in target:
             name, _, index_text = target.partition(" at ")
-            return ("setindex", lineno, name.strip(),
-                    parse_expr_text(index_text, lineno), value), pos + 1
-        return ("change", lineno, target.strip(), value), pos + 1
+            target_node = ("index", ("name", name.strip()),
+                           parse_expr_text(index_text, lineno))
+        else:
+            target_node = parse_expr_text(target, lineno)
+        return ("assign", lineno, target_node, value), pos + 1
 
     if head == "ask":
         if " into " not in rest:
@@ -438,7 +516,7 @@ def parse_one(lines, pos):
     if head == "skip":
         return ("skip", lineno), pos + 1
 
-    # Anything else is a bare expression (typically a function call).
+    # Anything else is a bare expression (typically a function or method call).
     return ("expr", lineno, parse_expr_text(text, lineno)), pos + 1
 
 
@@ -462,19 +540,67 @@ def parse_if(lines, pos):
     return ("if", lineno, branches, else_body), pos
 
 
+def parse_type(lines, pos):
+    lineno, text = lines[pos]
+    type_name = text[len("type"):].strip()
+    check_name(type_name, lineno)
+    fields, methods = [], {}
+    pos += 1
+    while pos < len(lines) and first_word(lines[pos][1]) != "end":
+        l2, t2 = lines[pos]
+        h2 = first_word(t2)
+        if h2 == "has":
+            field = t2[len("has"):].strip()
+            check_name(field, l2)
+            fields.append(field)
+            pos += 1
+        elif h2 == "to":
+            mstmt, pos = parse_one(lines, pos)
+            methods[mstmt[2]] = Function(mstmt[2], mstmt[3], mstmt[4])
+        else:
+            raise VantaError(f"line {l2}: inside a type, use 'has NAME' or 'to METHOD()'")
+    pos = expect_end(lines, pos, "type")
+    return ("type", lineno, type_name, fields, methods), pos
+
+
+def parse_attempt(lines, pos):
+    lineno = lines[pos][0]
+    body, pos = parse_block(lines, pos + 1)
+    if pos >= len(lines) or first_word(lines[pos][1]) != "rescue":
+        raise VantaError(f"line {lineno}: 'attempt' needs a 'rescue NAME' part")
+    errname = lines[pos][1][len("rescue"):].strip() or "error"
+    check_name(errname, lines[pos][0])
+    rescue_body, pos = parse_block(lines, pos + 1)
+    pos = expect_end(lines, pos, "attempt")
+    return ("attempt", lineno, body, errname, rescue_body), pos
+
+
 def parse_signature(sig, lineno):
     if "(" in sig and sig.endswith(")"):
         name = sig[:sig.index("(")].strip()
         inside = sig[sig.index("(") + 1:-1].strip()
-        params = [p.strip() for p in inside.split(",") if p.strip()]
+        param_texts = [p.strip() for p in inside.split(",") if p.strip()]
     elif " with " in sig:
         name, _, rest = sig.partition(" with ")
-        params = [p.strip() for p in rest.split(",") if p.strip()]
+        param_texts = [p.strip() for p in rest.split(",") if p.strip()]
     else:
-        name, params = sig.strip(), []
+        name, param_texts = sig.strip(), []
     check_name(name, lineno)
-    for p in params:
-        check_name(p, lineno)
+    params = []
+    seen_default = False
+    for p in param_texts:
+        if " be " in p:
+            pname, _, dtext = p.partition(" be ")
+            pname = pname.strip()
+            check_name(pname, lineno)
+            params.append((pname, parse_expr_text(dtext.strip(), lineno)))
+            seen_default = True
+        else:
+            check_name(p, lineno)
+            if seen_default:
+                raise VantaError(f"line {lineno}: '{p}' has no default but comes "
+                                 f"after one that does")
+            params.append((p, None))
     return name, params
 
 
@@ -491,8 +617,33 @@ def expect_end(lines, pos, what):
 class Function:
     def __init__(self, name, params, body):
         self.name = name
-        self.params = params
+        self.params = params          # list of (name, default_node_or_None)
         self.body = body
+
+
+class Builtin:
+    def __init__(self, name, fn):
+        self.name = name
+        self.fn = fn
+
+
+class VantaType:
+    def __init__(self, name, fields, methods):
+        self.name = name
+        self.fields = fields
+        self.methods = methods
+
+
+class VantaInstance:
+    def __init__(self, vtype, attrs):
+        self.vtype = vtype
+        self.attrs = attrs
+
+
+class BoundMethod:
+    def __init__(self, inst, fn):
+        self.inst = inst
+        self.fn = fn
 
 
 _MISSING = object()
@@ -562,17 +713,8 @@ def _run_stmt(stmt, env):
     elif tag == "let":
         env.define(stmt[2], eval_expr(stmt[3], env))
 
-    elif tag == "change":
-        name, value = stmt[2], eval_expr(stmt[3], env)
-        if not env.assign(name, value):
-            raise VantaError(f"'{name}' doesn't exist yet (use: let {name} be ...)")
-
-    elif tag == "setindex":
-        _, _, name, index_node, value_node = stmt
-        collection = lookup(env, name)
-        index = eval_expr(index_node, env)
-        value = eval_expr(value_node, env)
-        set_index(collection, index, value)
+    elif tag == "assign":
+        do_assign(stmt[2], eval_expr(stmt[3], env), env)
 
     elif tag == "append":
         value = eval_expr(stmt[2], env)
@@ -630,6 +772,18 @@ def _run_stmt(stmt, env):
         _, _, name, params, body = stmt
         env.define(name, Function(name, params, body))
 
+    elif tag == "type":
+        _, _, name, fields, methods = stmt
+        env.define(name, VantaType(name, fields, methods))
+
+    elif tag == "attempt":
+        _, _, body, errname, rescue_body = stmt
+        try:
+            run_block(body, env)
+        except VantaError as e:
+            env.define(errname, clean_message(str(e)))
+            run_block(rescue_body, env)
+
     elif tag == "return":
         raise ReturnSignal(eval_expr(stmt[2], env))
 
@@ -649,6 +803,15 @@ def _run_stmt(stmt, env):
         raise VantaError(f"internal error: unknown statement {tag}")
 
 
+def clean_message(msg):
+    """Drop a leading 'line N: ' so rescue gets a tidy message."""
+    if msg.startswith("line "):
+        idx = msg.find(": ")
+        if idx != -1:
+            return msg[idx + 2:]
+    return msg
+
+
 # --------------------------------------------------------------------------
 # Expression evaluation
 # --------------------------------------------------------------------------
@@ -661,9 +824,14 @@ def eval_expr(node, env):
 
     if tag == "name":
         value = env.get(node[1])
-        if value is _MISSING:
-            raise VantaError(f"I don't know what '{node[1]}' is yet")
-        return value
+        if value is not _MISSING:
+            return value
+        if node[1] in BUILTIN_VALUES:
+            return BUILTIN_VALUES[node[1]]
+        raise VantaError(f"I don't know what '{node[1]}' is yet")
+
+    if tag == "format":
+        return "".join(display(eval_expr(part, env)) for part in node[1])
 
     if tag == "list":
         return [eval_expr(item, env) for item in node[1]]
@@ -702,40 +870,61 @@ def eval_expr(node, env):
     if tag == "index":
         return get_index(eval_expr(node[1], env), eval_expr(node[2], env))
 
+    if tag == "getattr":
+        return get_attr(eval_expr(node[1], env), node[2])
+
     if tag == "call":
-        return eval_call(node, env)
+        callee = resolve_callee(node[1], env)
+        args = [eval_expr(a, env) for a in node[2]]
+        return apply_callable(callee, args)
 
     raise VantaError(f"internal error: unknown expression {tag}")
 
 
-def eval_call(node, env):
-    target, arg_nodes = node[1], node[2]
-    args = [eval_expr(a, env) for a in arg_nodes]
+# --------------------------------------------------------------------------
+# Calling: functions, builtins, methods, constructors
+# --------------------------------------------------------------------------
 
+def resolve_callee(target, env):
     if target[0] == "name":
         name = target[1]
         value = env.get(name)
-        if isinstance(value, Function):
-            return call_function(value, args)
-        if name in BUILTINS:
-            return BUILTINS[name](args)
         if value is not _MISSING:
-            raise VantaError(f"'{name}' is not something you can call")
+            return value
+        if name in BUILTIN_VALUES:
+            return BUILTIN_VALUES[name]
         raise VantaError(f"I don't know a function called '{name}'")
+    return eval_expr(target, env)
 
-    value = eval_expr(target, env)
-    if isinstance(value, Function):
-        return call_function(value, args)
+
+def apply_callable(callee, args):
+    if isinstance(callee, Function):
+        return call_function(callee, args)
+    if isinstance(callee, Builtin):
+        return callee.fn(args)
+    if isinstance(callee, BoundMethod):
+        return call_method(callee.inst, callee.fn, args)
+    if isinstance(callee, VantaType):
+        return construct_instance(callee, args)
     raise VantaError("that value is not a function you can call")
 
 
-def call_function(fn, args):
-    if len(args) != len(fn.params):
-        raise VantaError(f"'{fn.name}' expects {len(fn.params)} value(s), "
+def bind_params(label, params, args, local):
+    if len(args) > len(params):
+        raise VantaError(f"{label} takes at most {len(params)} value(s), "
                          f"but got {len(args)}")
+    for i, (pname, default) in enumerate(params):
+        if i < len(args):
+            local.define(pname, args[i])
+        elif default is not None:
+            local.define(pname, eval_expr(default, local))
+        else:
+            raise VantaError(f"{label} is missing a value for '{pname}'")
+
+
+def call_function(fn, args):
     local = Environment(GLOBAL_ENV)
-    for param, value in zip(fn.params, args):
-        local.define(param, value)
+    bind_params(f"'{fn.name}'", fn.params, args, local)
     try:
         run_block(fn.body, local)
     except ReturnSignal as r:
@@ -743,11 +932,59 @@ def call_function(fn, args):
     return None
 
 
-def lookup(env, name):
-    value = env.get(name)
-    if value is _MISSING:
-        raise VantaError(f"I don't know what '{name}' is yet")
-    return value
+def call_method(inst, fn, args):
+    local = Environment(GLOBAL_ENV)
+    local.define("me", inst)
+    bind_params(f"'{fn.name}'", fn.params, args, local)
+    try:
+        run_block(fn.body, local)
+    except ReturnSignal as r:
+        return r.value
+    return None
+
+
+def construct_instance(vtype, args):
+    inst = VantaInstance(vtype, {f: None for f in vtype.fields})
+    if "setup" in vtype.methods:
+        call_method(inst, vtype.methods["setup"], args)
+    elif len(args) == len(vtype.fields):
+        for field, value in zip(vtype.fields, args):
+            inst.attrs[field] = value
+    else:
+        raise VantaError(f"{vtype.name} expects {len(vtype.fields)} value(s) "
+                         f"({', '.join(vtype.fields)}), but got {len(args)}")
+    return inst
+
+
+def get_attr(obj, attr):
+    if isinstance(obj, VantaInstance):
+        if attr in obj.attrs:
+            return obj.attrs[attr]
+        if attr in obj.vtype.methods:
+            return BoundMethod(obj, obj.vtype.methods[attr])
+        raise VantaError(f"a {obj.vtype.name} has no '{attr}'")
+    raise VantaError("you can only use '.' on an object made from a type")
+
+
+def set_attr(obj, attr, value):
+    if isinstance(obj, VantaInstance):
+        obj.attrs[attr] = value
+        return
+    raise VantaError("you can only set a '.' field on an object made from a type")
+
+
+def do_assign(target, value, env):
+    tag = target[0]
+    if tag == "name":
+        if not env.assign(target[1], value):
+            raise VantaError(f"'{target[1]}' doesn't exist yet "
+                             f"(use: let {target[1]} be ...)")
+    elif tag == "index":
+        set_index(eval_expr(target[1], env), eval_expr(target[2], env), value)
+    elif tag == "getattr":
+        set_attr(eval_expr(target[1], env), target[2], value)
+    else:
+        raise VantaError("you can't change that")
 
 
 # --------------------------------------------------------------------------
@@ -767,6 +1004,8 @@ def arithmetic(op, a, b):
         return a - b
     if op == "*":
         return a * b
+    if op == "^":
+        return a ** b
     if op == "%":
         if b == 0:
             raise VantaError("you can't take the remainder with zero")
@@ -850,6 +1089,27 @@ def _need(args, count, name):
         raise VantaError(f"{name} expects {count} value(s), got {len(args)}")
 
 
+def int_arg(value, name):
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise VantaError(f"{name} needs whole numbers")
+    return value
+
+
+def num_arg(value, name):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise VantaError(f"{name} needs a number")
+    return value
+
+
+def tidy_number(value):
+    """Turn 4.0 into 4 but leave 4.5 alone."""
+    if isinstance(value, float) and value == int(value):
+        return int(value)
+    return value
+
+
+# ---- conversions & inspection -------------------------------------------
+
 def b_length(args):
     _need(args, 1, "length")
     if isinstance(args[0], (str, list, dict)):
@@ -880,6 +1140,43 @@ def b_number(args):
     raise VantaError("can't turn that into a number")
 
 
+def b_type_of(args):
+    _need(args, 1, "type_of")
+    return type_name(args[0])
+
+
+def b_is_number(args):
+    _need(args, 1, "is_number")
+    return isinstance(args[0], (int, float)) and not isinstance(args[0], bool)
+
+
+def b_is_text(args):
+    _need(args, 1, "is_text")
+    return isinstance(args[0], str)
+
+
+def b_is_list(args):
+    _need(args, 1, "is_list")
+    return isinstance(args[0], list)
+
+
+def b_is_map(args):
+    _need(args, 1, "is_map")
+    return isinstance(args[0], dict)
+
+
+def b_is_function(args):
+    _need(args, 1, "is_function")
+    return isinstance(args[0], (Function, Builtin, BoundMethod))
+
+
+def b_is_nothing(args):
+    _need(args, 1, "is_nothing")
+    return args[0] is None
+
+
+# ---- text helpers --------------------------------------------------------
+
 def b_upper(args):
     _need(args, 1, "uppercase")
     return display(args[0]).upper()
@@ -889,6 +1186,139 @@ def b_lower(args):
     _need(args, 1, "lowercase")
     return display(args[0]).lower()
 
+
+def b_trim(args):
+    _need(args, 1, "trim")
+    return display(args[0]).strip()
+
+
+def b_replace(args):
+    _need(args, 3, "replace")
+    return display(args[0]).replace(display(args[1]), display(args[2]))
+
+
+def b_starts_with(args):
+    _need(args, 2, "starts_with")
+    return display(args[0]).startswith(display(args[1]))
+
+
+def b_ends_with(args):
+    _need(args, 2, "ends_with")
+    return display(args[0]).endswith(display(args[1]))
+
+
+def b_find(args):
+    _need(args, 2, "find")
+    return display(args[0]).find(display(args[1]))
+
+
+def b_split(args):
+    _need(args, 2, "split")
+    return display(args[0]).split(display(args[1]))
+
+
+def b_lines(args):
+    _need(args, 1, "lines")
+    return display(args[0]).split("\n")
+
+
+def b_pad_left(args):
+    if len(args) not in (2, 3):
+        raise VantaError("pad_left expects text, a width, and an optional character")
+    fill = display(args[2])[:1] or " " if len(args) == 3 else " "
+    return display(args[0]).rjust(int_arg(args[1], "pad_left"), fill)
+
+
+def b_pad_right(args):
+    if len(args) not in (2, 3):
+        raise VantaError("pad_right expects text, a width, and an optional character")
+    fill = display(args[2])[:1] or " " if len(args) == 3 else " "
+    return display(args[0]).ljust(int_arg(args[1], "pad_right"), fill)
+
+
+# ---- number helpers ------------------------------------------------------
+
+def b_abs(args):
+    _need(args, 1, "abs")
+    return abs(num_arg(args[0], "abs"))
+
+
+def b_round(args):
+    _need(args, 1, "round")
+    return round(num_arg(args[0], "round"))
+
+
+def b_floor(args):
+    _need(args, 1, "floor")
+    return math.floor(num_arg(args[0], "floor"))
+
+
+def b_ceil(args):
+    _need(args, 1, "ceil")
+    return math.ceil(num_arg(args[0], "ceil"))
+
+
+def b_sqrt(args):
+    _need(args, 1, "sqrt")
+    value = num_arg(args[0], "sqrt")
+    if value < 0:
+        raise VantaError("can't take the square root of a negative number")
+    return tidy_number(math.sqrt(value))
+
+
+def b_power(args):
+    _need(args, 2, "power")
+    return num_arg(args[0], "power") ** num_arg(args[1], "power")
+
+
+def _less(a, b):
+    both_num = (isinstance(a, (int, float)) and isinstance(b, (int, float))
+                and not isinstance(a, bool) and not isinstance(b, bool))
+    both_text = isinstance(a, str) and isinstance(b, str)
+    if not (both_num or both_text):
+        raise VantaError("min/max need all numbers or all text")
+    return a < b
+
+
+def _collect(args, name):
+    values = args[0] if len(args) == 1 and isinstance(args[0], list) else list(args)
+    if not values:
+        raise VantaError(f"{name} needs at least one value")
+    return values
+
+
+def b_min(args):
+    values = _collect(args, "min")
+    best = values[0]
+    for v in values[1:]:
+        if _less(v, best):
+            best = v
+    return best
+
+
+def b_max(args):
+    values = _collect(args, "max")
+    best = values[0]
+    for v in values[1:]:
+        if _less(best, v):
+            best = v
+    return best
+
+
+def b_random(args):
+    _need(args, 2, "random")
+    low, high = int_arg(args[0], "random"), int_arg(args[1], "random")
+    if low > high:
+        raise VantaError("random needs the low number first")
+    return random.randint(low, high)
+
+
+def b_now(args):
+    _need(args, 0, "now")
+    return int(time.time())
+
+
+# ---- list & map helpers --------------------------------------------------
 
 def b_first(args):
     _need(args, 1, "first")
@@ -912,14 +1342,6 @@ def b_range(args):
     raise VantaError("range expects 1 or 2 numbers")
 
 
-def b_random(args):
-    _need(args, 2, "random")
-    low, high = int_arg(args[0], "random"), int_arg(args[1], "random")
-    if low > high:
-        raise VantaError("random needs the low number first")
-    return random.randint(low, high)
-
-
 def b_contains(args):
     _need(args, 2, "contains")
     coll, item = args
@@ -936,17 +1358,154 @@ def b_join(args):
     return display(sep).join(display(x) for x in seq)
 
 
-def b_split(args):
-    _need(args, 2, "split")
-    return display(args[0]).split(display(args[1]))
-
-
 def b_keys(args):
     _need(args, 1, "keys")
     if not isinstance(args[0], dict):
         raise VantaError("keys needs a map")
     return list(args[0].keys())
 
+
+def b_values(args):
+    _need(args, 1, "values")
+    if not isinstance(args[0], dict):
+        raise VantaError("values needs a map")
+    return list(args[0].values())
+
+
+def b_sort(args):
+    _need(args, 1, "sort")
+    if not isinstance(args[0], list):
+        raise VantaError("sort needs a list")
+    try:
+        return sorted(args[0])
+    except TypeError:
+        raise VantaError("sort needs a list of all numbers or all text")
+
+
+def b_reverse(args):
+    _need(args, 1, "reverse")
+    if isinstance(args[0], list):
+        return list(reversed(args[0]))
+    if isinstance(args[0], str):
+        return args[0][::-1]
+    raise VantaError("reverse needs a list or text")
+
+
+def b_slice(args):
+    _need(args, 3, "slice")
+    seq = args[0]
+    if not isinstance(seq, (list, str)):
+        raise VantaError("slice needs a list or text")
+    return seq[int_arg(args[1], "slice"):int_arg(args[2], "slice")]
+
+
+def b_push(args):
+    _need(args, 2, "push")
+    if not isinstance(args[0], list):
+        raise VantaError("push needs a list")
+    args[0].append(args[1])
+    return None
+
+
+def b_pop(args):
+    _need(args, 1, "pop")
+    if not isinstance(args[0], list) or not args[0]:
+        raise VantaError("pop needs a non-empty list")
+    return args[0].pop()
+
+
+def b_remove_at(args):
+    _need(args, 2, "remove_at")
+    if not isinstance(args[0], list):
+        raise VantaError("remove_at needs a list")
+    return args[0].pop(whole_index(args[1], len(args[0])))
+
+
+# ---- higher-order functions ---------------------------------------------
+
+def b_map(args):
+    _need(args, 2, "map")
+    fn, seq = args
+    if not isinstance(seq, list):
+        raise VantaError("map needs a function and a list")
+    return [apply_callable(fn, [x]) for x in seq]
+
+
+def b_keep(args):
+    _need(args, 2, "keep")
+    fn, seq = args
+    if not isinstance(seq, list):
+        raise VantaError("keep needs a function and a list")
+    return [x for x in seq if truthy(apply_callable(fn, [x]))]
+
+
+def b_reduce(args):
+    _need(args, 3, "reduce")
+    fn, seq, start = args
+    if not isinstance(seq, list):
+        raise VantaError("reduce needs a function, a list, and a starting value")
+    acc = start
+    for x in seq:
+        acc = apply_callable(fn, [acc, x])
+    return acc
+
+
+def b_each(args):
+    _need(args, 2, "each")
+    fn, seq = args
+    if not isinstance(seq, list):
+        raise VantaError("each needs a function and a list")
+    for x in seq:
+        apply_callable(fn, [x])
+    return None
+
+
+def b_count_where(args):
+    _need(args, 2, "count_where")
+    fn, seq = args
+    if not isinstance(seq, list):
+        raise VantaError("count_where needs a function and a list")
+    return sum(1 for x in seq if truthy(apply_callable(fn, [x])))
+
+
+def b_find_where(args):
+    _need(args, 2, "find_where")
+    fn, seq = args
+    if not isinstance(seq, list):
+        raise VantaError("find_where needs a function and a list")
+    for x in seq:
+        if truthy(apply_callable(fn, [x])):
+            return x
+    return None
+
+
+def b_sort_by(args):
+    _need(args, 2, "sort_by")
+    fn, seq = args
+    if not isinstance(seq, list):
+        raise VantaError("sort_by needs a function and a list")
+    try:
+        return sorted(seq, key=lambda x: apply_callable(fn, [x]))
+    except TypeError:
+        raise VantaError("sort_by's keys must be all numbers or all text")
+
+
+# ---- errors --------------------------------------------------------------
+
+def b_fail(args):
+    _need(args, 1, "fail")
+    raise VantaError(display(args[0]))
+
+
+def b_assert(args):
+    if len(args) not in (1, 2):
+        raise VantaError("assert expects a condition and an optional message")
+    if not truthy(args[0]):
+        raise VantaError(display(args[1]) if len(args) == 2 else "assertion failed")
+    return None
+
+
+# ---- files, system, json -------------------------------------------------
 
 def b_read_file(args):
     _need(args, 1, "read_file")
@@ -977,9 +1536,6 @@ def b_run(args):
 
 
 def b_shell(args):
-    """Like run, but returns a map with output AND exit code.
-    Optional 2nd arg is a working directory; optional 3rd is a map of
-    environment variables to set for the command."""
     if len(args) not in (1, 2, 3):
         raise VantaError("shell expects a command, an optional directory, "
                          "and an optional map of environment variables")
@@ -1071,199 +1627,68 @@ def b_interpreter(args):
     return os.path.abspath(sys.argv[0])
 
 
-def int_arg(value, name):
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise VantaError(f"{name} needs whole numbers")
-    return value
-
-
-def num_arg(value, name):
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise VantaError(f"{name} needs a number")
-    return value
-
-
-# ---- text helpers --------------------------------------------------------
-
-def b_replace(args):
-    _need(args, 3, "replace")
-    return display(args[0]).replace(display(args[1]), display(args[2]))
-
-
-def b_trim(args):
-    _need(args, 1, "trim")
-    return display(args[0]).strip()
-
-
-def b_starts_with(args):
-    _need(args, 2, "starts_with")
-    return display(args[0]).startswith(display(args[1]))
-
-
-def b_ends_with(args):
-    _need(args, 2, "ends_with")
-    return display(args[0]).endswith(display(args[1]))
-
-
-def b_find(args):
-    _need(args, 2, "find")
-    return display(args[0]).find(display(args[1]))
-
-
-def b_lines(args):
-    _need(args, 1, "lines")
-    return display(args[0]).split("\n")
-
-
-# ---- number helpers ------------------------------------------------------
-
-def b_abs(args):
-    _need(args, 1, "abs")
-    return abs(num_arg(args[0], "abs"))
-
-
-def b_round(args):
-    _need(args, 1, "round")
-    return round(num_arg(args[0], "round"))
-
-
-def b_floor(args):
-    _need(args, 1, "floor")
-    return math.floor(num_arg(args[0], "floor"))
-
-
-def b_ceil(args):
-    _need(args, 1, "ceil")
-    return math.ceil(num_arg(args[0], "ceil"))
-
-
-def _less(a, b):
-    both_num = (isinstance(a, (int, float)) and isinstance(b, (int, float))
-                and not isinstance(a, bool) and not isinstance(b, bool))
-    both_text = isinstance(a, str) and isinstance(b, str)
-    if not (both_num or both_text):
-        raise VantaError("min/max need all numbers or all text")
-    return a < b
-
-
-def _collect(args, name):
-    values = args[0] if len(args) == 1 and isinstance(args[0], list) else list(args)
-    if not values:
-        raise VantaError(f"{name} needs at least one value")
-    return values
-
-
-def b_min(args):
-    values = _collect(args, "min")
-    best = values[0]
-    for v in values[1:]:
-        if _less(v, best):
-            best = v
-    return best
-
-
-def b_max(args):
-    values = _collect(args, "max")
-    best = values[0]
-    for v in values[1:]:
-        if _less(best, v):
-            best = v
-    return best
-
-
-# ---- list helpers --------------------------------------------------------
-
-def b_sort(args):
-    _need(args, 1, "sort")
-    if not isinstance(args[0], list):
-        raise VantaError("sort needs a list")
-    try:
-        return sorted(args[0])
-    except TypeError:
-        raise VantaError("sort needs a list of all numbers or all text")
-
-
-def b_reverse(args):
-    _need(args, 1, "reverse")
-    if isinstance(args[0], list):
-        return list(reversed(args[0]))
-    if isinstance(args[0], str):
-        return args[0][::-1]
-    raise VantaError("reverse needs a list or text")
-
-
-def b_slice(args):
-    _need(args, 3, "slice")
-    seq = args[0]
-    if not isinstance(seq, (list, str)):
-        raise VantaError("slice needs a list or text")
-    return seq[int_arg(args[1], "slice"):int_arg(args[2], "slice")]
-
-
-def b_remove_at(args):
-    _need(args, 2, "remove_at")
-    if not isinstance(args[0], list):
-        raise VantaError("remove_at needs a list")
-    idx = whole_index(args[1], len(args[0]))
-    return args[0].pop(idx)
-
-
-def b_now(args):
-    _need(args, 0, "now")
-    return int(time.time())
-
-
 BUILTINS = {
-    "length": b_length,
-    "text": b_text,
-    "number": b_number,
-    "uppercase": b_upper,
-    "lowercase": b_lower,
-    "first": b_first,
-    "last": b_last,
-    "range": b_range,
-    "random": b_random,
-    "contains": b_contains,
-    "join": b_join,
-    "split": b_split,
-    "keys": b_keys,
-    "read_file": b_read_file,
-    "write_file": b_write_file,
-    "run": b_run,
-    "shell": b_shell,
-    "arguments": b_arguments,
-    "env": b_env,
-    "make_dir": b_make_dir,
-    "remove_path": b_remove_path,
-    "list_dir": b_list_dir,
-    "path_exists": b_path_exists,
-    "copy_path": b_copy_path,
-    "to_json": b_to_json,
-    "from_json": b_from_json,
-    "interpreter": b_interpreter,
-    "replace": b_replace,
-    "trim": b_trim,
-    "starts_with": b_starts_with,
-    "ends_with": b_ends_with,
-    "find": b_find,
-    "lines": b_lines,
-    "abs": b_abs,
-    "round": b_round,
-    "floor": b_floor,
-    "ceil": b_ceil,
-    "min": b_min,
-    "max": b_max,
-    "sort": b_sort,
-    "reverse": b_reverse,
-    "slice": b_slice,
+    # conversions & inspection
+    "length": b_length, "text": b_text, "number": b_number,
+    "type_of": b_type_of, "is_number": b_is_number, "is_text": b_is_text,
+    "is_list": b_is_list, "is_map": b_is_map, "is_function": b_is_function,
+    "is_nothing": b_is_nothing,
+    # text
+    "uppercase": b_upper, "lowercase": b_lower, "trim": b_trim,
+    "replace": b_replace, "starts_with": b_starts_with, "ends_with": b_ends_with,
+    "find": b_find, "split": b_split, "lines": b_lines,
+    "pad_left": b_pad_left, "pad_right": b_pad_right,
+    # numbers
+    "abs": b_abs, "round": b_round, "floor": b_floor, "ceil": b_ceil,
+    "sqrt": b_sqrt, "power": b_power, "min": b_min, "max": b_max,
+    "random": b_random, "now": b_now,
+    # lists & maps
+    "first": b_first, "last": b_last, "range": b_range, "contains": b_contains,
+    "join": b_join, "keys": b_keys, "values": b_values, "sort": b_sort,
+    "reverse": b_reverse, "slice": b_slice, "push": b_push, "pop": b_pop,
     "remove_at": b_remove_at,
-    "now": b_now,
+    # higher-order
+    "map": b_map, "keep": b_keep, "reduce": b_reduce, "each": b_each,
+    "count_where": b_count_where, "find_where": b_find_where, "sort_by": b_sort_by,
+    # errors
+    "fail": b_fail, "assert": b_assert,
+    # files, system, json
+    "read_file": b_read_file, "write_file": b_write_file, "run": b_run,
+    "shell": b_shell, "arguments": b_arguments, "env": b_env,
+    "make_dir": b_make_dir, "remove_path": b_remove_path, "list_dir": b_list_dir,
+    "path_exists": b_path_exists, "copy_path": b_copy_path,
+    "to_json": b_to_json, "from_json": b_from_json, "interpreter": b_interpreter,
 }
+
+# A first-class value for every builtin, so they can be passed to map/keep/etc.
+BUILTIN_VALUES = {name: Builtin(name, fn) for name, fn in BUILTINS.items()}
 
 
 # ===========================================================================
 # SHARED HELPERS
 # ===========================================================================
+
+def type_name(value):
+    if value is None:
+        return "nothing"
+    if isinstance(value, bool):
+        return "yes-no"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "text"
+    if isinstance(value, list):
+        return "list"
+    if isinstance(value, dict):
+        return "map"
+    if isinstance(value, (Function, Builtin, BoundMethod)):
+        return "function"
+    if isinstance(value, VantaType):
+        return "type"
+    if isinstance(value, VantaInstance):
+        return value.vtype.name
+    return "value"
+
 
 def truthy(value):
     if value is None:
@@ -1297,6 +1722,19 @@ def display(value):
                                for k, v in value.items()) + "}"
     if isinstance(value, Function):
         return f"<function {value.name}>"
+    if isinstance(value, Builtin):
+        return f"<builtin {value.name}>"
+    if isinstance(value, BoundMethod):
+        return f"<method {value.fn.name}>"
+    if isinstance(value, VantaType):
+        return f"<type {value.name}>"
+    if isinstance(value, VantaInstance):
+        vt = value.vtype
+        method = vt.methods.get("show")
+        if method is not None and len(method.params) == 0:
+            return display(call_method(value, method, []))
+        inner = ", ".join(f"{f}=" + display_item(value.attrs.get(f)) for f in vt.fields)
+        return f"{vt.name}({inner})"
     return str(value)
 
 
@@ -1319,7 +1757,7 @@ def smart_value(text):
 RESERVED = {"if", "end", "otherwise", "repeat", "while", "for", "each", "in",
             "to", "give", "back", "say", "let", "change", "ask", "stop",
             "skip", "import", "is", "be", "and", "or", "not", "yes", "no",
-            "nothing", "times", "at"}
+            "nothing", "times", "at", "type", "has", "attempt", "rescue", "new"}
 
 
 def check_name(name, lineno):
@@ -1364,7 +1802,7 @@ def run_source(source):
 
 
 def repl():
-    print("Vanta 2.0 - type Vanta code, or 'bye' to quit.")
+    print("Vanta 3.0 - type Vanta code, or 'bye' to quit.")
     buffer, depth = [], 0
     while True:
         try:
