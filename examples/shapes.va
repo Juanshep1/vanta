@@ -1,0 +1,46 @@
+# Inheritance, polymorphism, and list comprehensions together.
+
+type Shape
+    has name
+    to area()
+        give back 0
+    end
+end
+
+type Circle from Shape
+    has radius
+    to setup(radius)
+        change me.name to "circle"
+        change me.radius to radius
+    end
+    to area()
+        give back pi * me.radius ^ 2
+    end
+end
+
+type Rectangle from Shape
+    has width
+    has height
+    to setup(width, height)
+        change me.name to "rectangle"
+        change me.width to width
+        change me.height to height
+    end
+    to area()
+        give back me.width * me.height
+    end
+end
+
+let shapes be [new Circle(2), new Rectangle(3, 4), new Circle(1)]
+
+# Each shape.area() runs the right type's version (polymorphism)
+for each shape in shapes
+    say "{shape.name} has area {round(shape.area())}"
+end
+
+# Filter with a comprehension and a type check
+let circles be [s for each s in shapes if s is a Circle]
+say "There are {length(circles)} circles."
+
+# Transform with a comprehension
+say "All areas: {to_json([round(s.area()) for each s in shapes])}"

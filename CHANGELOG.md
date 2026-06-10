@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.1
+- Type inheritance with `type Child from Parent`, method override, and the
+  `is a` / `is an` type check (plus an `is_a` builtin)
+- List comprehensions: `[n * n for each n in nums if n is over 2]`
+- Regular expressions: `matches`, `find_all`, `replace_all`
+- Date and time helpers: `today`, `clock`
+- Math constants `pi` and `e`
+
 ## 3.0
 - User-defined types with fields (`has`), methods (`to`), the `me` reference,
   a `setup` constructor, and a `show` method for printing

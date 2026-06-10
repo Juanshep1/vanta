@@ -20,6 +20,7 @@ Start REPL:   python3 vanta.py
 
 import sys
 import os
+import re
 import shutil
 import json
 import time
@@ -49,6 +50,8 @@ PHRASES = {
     ("is", "less", "than"): "<",
     ("is", "smaller", "than"): "<",
     ("is", "not"): "!=",
+    ("is", "a"): "isa",
+    ("is", "an"): "isa",
     ("is", "over"): ">",
     ("is", "above"): ">",
     ("is", "under"): "<",
@@ -215,6 +218,9 @@ class Parser:
     def parse_comparison(self):
         left = self.parse_add_sub()
         k, v = self.peek()
+        if k == "OP" and v == "isa":
+            self.take()
+            return ("isa", left, self.parse_add_sub())
         if k == "OP" and v in COMPARE_OPS:
             self.take()
             return ("cmp", v, left, self.parse_add_sub())
@@ -291,10 +297,42 @@ class Parser:
             self.expect("RP", "a closing ) is missing")
             return node
         if k == "LB":
-            return ("list", self.parse_list_until("RB"))
+            return self.parse_list_or_comprehension()
         if k == "LC":
             return ("map", self.parse_map())
         raise VantaError("that line is missing a value somewhere")
+
+    def parse_list_or_comprehension(self):
+        if self.peek()[0] == "RB":
+            self.take()
+            return ("list", [])
+        first = self.parse_expression()
+        if self.is_word("for"):                 # [EXPR for each NAME in LIST if COND]
+            self.take()
+            if not self.is_word("each"):
+                raise VantaError("a comprehension reads [VALUE for each NAME in LIST]")
+            self.take()
+            k, name = self.take()
+            if k != "NAME":
+                raise VantaError("expected a name after 'for each'")
+            if not self.is_word("in"):
+                raise VantaError("a comprehension needs 'in' before the list")
+            self.take()
+            iter_expr = self.parse_expression()
+            cond = None
+            if self.is_word("if"):
+                self.take()
+                cond = self.parse_expression()
+            self.expect("RB", "a closing ] is missing")
+            return ("listcomp", first, name, iter_expr, cond)
+        items = [first]
+        while True:
+            k = self.take()[0]
+            if k == "RB":
+                return ("list", items)
+            if k != "COMMA":
+                raise VantaError("expected a comma between values")
+            items.append(self.parse_expression())
 
     def parse_list_until(self, closer):
         items = []
@@ -542,7 +580,14 @@ def parse_if(lines, pos):
 
 def parse_type(lines, pos):
     lineno, text = lines[pos]
-    type_name = text[len("type"):].strip()
+    header = text[len("type"):].strip()
+    parent_name = None
+    if " from " in header:
+        type_name, _, parent_name = header.partition(" from ")
+        type_name, parent_name = type_name.strip(), parent_name.strip()
+        check_name(parent_name, lineno)
+    else:
+        type_name = header
     check_name(type_name, lineno)
     fields, methods = [], {}
     pos += 1
@@ -560,7 +605,7 @@ def parse_type(lines, pos):
         else:
             raise VantaError(f"line {l2}: inside a type, use 'has NAME' or 'to METHOD()'")
     pos = expect_end(lines, pos, "type")
-    return ("type", lineno, type_name, fields, methods), pos
+    return ("type", lineno, type_name, parent_name, fields, methods), pos
 
 
 def parse_attempt(lines, pos):
@@ -628,10 +673,11 @@ class Builtin:
 
 
 class VantaType:
-    def __init__(self, name, fields, methods):
+    def __init__(self, name, fields, methods, parent=None):
         self.name = name
         self.fields = fields
         self.methods = methods
+        self.parent = parent
 
 
 class VantaInstance:
@@ -773,8 +819,20 @@ def _run_stmt(stmt, env):
         env.define(name, Function(name, params, body))
 
     elif tag == "type":
-        _, _, name, fields, methods = stmt
-        env.define(name, VantaType(name, fields, methods))
+        _, _, name, parent_name, fields, methods = stmt
+        parent = None
+        if parent_name is not None:
+            parent = env.get(parent_name)
+            if not isinstance(parent, VantaType):
+                raise VantaError(f"'{parent_name}' is not a type to inherit from")
+            merged_fields = list(parent.fields)
+            for field in fields:
+                if field not in merged_fields:
+                    merged_fields.append(field)
+            merged_methods = dict(parent.methods)
+            merged_methods.update(methods)
+            fields, methods = merged_fields, merged_methods
+        env.define(name, VantaType(name, fields, methods, parent))
 
     elif tag == "attempt":
         _, _, body, errname, rescue_body = stmt
@@ -863,6 +921,22 @@ def eval_expr(node, env):
 
     if tag == "cmp":
         return compare(node[1], eval_expr(node[2], env), eval_expr(node[3], env))
+
+    if tag == "isa":
+        target = eval_expr(node[2], env)
+        if not isinstance(target, VantaType):
+            raise VantaError("the right side of 'is a' must be a type")
+        return is_instance_of(eval_expr(node[1], env), target)
+
+    if tag == "listcomp":
+        _, out_expr, var, iter_expr, cond = node
+        loop_env = Environment(env)
+        result = []
+        for item in iterate(eval_expr(iter_expr, env)):
+            loop_env.define(var, item)
+            if cond is None or truthy(eval_expr(cond, loop_env)):
+                result.append(eval_expr(out_expr, loop_env))
+        return result
 
     if tag == "arith":
         return arithmetic(node[1], eval_expr(node[2], env), eval_expr(node[3], env))
@@ -954,6 +1028,17 @@ def construct_instance(vtype, args):
         raise VantaError(f"{vtype.name} expects {len(vtype.fields)} value(s) "
                          f"({', '.join(vtype.fields)}), but got {len(args)}")
     return inst
+
+
+def is_instance_of(value, vtype):
+    if not isinstance(value, VantaInstance):
+        return False
+    t = value.vtype
+    while t is not None:
+        if t is vtype:
+            return True
+        t = t.parent
+    return False
 
 
 def get_attr(obj, attr):
@@ -1627,12 +1712,62 @@ def b_interpreter(args):
     return os.path.abspath(sys.argv[0])
 
 
+# ---- type checks ---------------------------------------------------------
+
+def b_is_a(args):
+    _need(args, 2, "is_a")
+    if not isinstance(args[1], VantaType):
+        raise VantaError("is_a's second value must be a type")
+    return is_instance_of(args[0], args[1])
+
+
+# ---- regular expressions -------------------------------------------------
+
+def b_matches(args):
+    _need(args, 2, "matches")
+    try:
+        return re.search(display(args[1]), display(args[0])) is not None
+    except re.error as e:
+        raise VantaError(f"that pattern is not valid: {e}")
+
+
+def b_find_all(args):
+    _need(args, 2, "find_all")
+    try:
+        return [m.group(0) for m in re.finditer(display(args[1]), display(args[0]))]
+    except re.error as e:
+        raise VantaError(f"that pattern is not valid: {e}")
+
+
+def b_replace_all(args):
+    _need(args, 3, "replace_all")
+    try:
+        return re.sub(display(args[1]), display(args[2]), display(args[0]))
+    except re.error as e:
+        raise VantaError(f"that pattern is not valid: {e}")
+
+
+# ---- dates & time --------------------------------------------------------
+
+def b_today(args):
+    _need(args, 0, "today")
+    return time.strftime("%Y-%m-%d")
+
+
+def b_clock(args):
+    _need(args, 0, "clock")
+    return time.strftime("%H:%M:%S")
+
+
 BUILTINS = {
     # conversions & inspection
     "length": b_length, "text": b_text, "number": b_number,
     "type_of": b_type_of, "is_number": b_is_number, "is_text": b_is_text,
     "is_list": b_is_list, "is_map": b_is_map, "is_function": b_is_function,
-    "is_nothing": b_is_nothing,
+    "is_nothing": b_is_nothing, "is_a": b_is_a,
+    # regular expressions & dates
+    "matches": b_matches, "find_all": b_find_all, "replace_all": b_replace_all,
+    "today": b_today, "clock": b_clock,
     # text
     "uppercase": b_upper, "lowercase": b_lower, "trim": b_trim,
     "replace": b_replace, "starts_with": b_starts_with, "ends_with": b_ends_with,
@@ -1757,7 +1892,8 @@ def smart_value(text):
 RESERVED = {"if", "end", "otherwise", "repeat", "while", "for", "each", "in",
             "to", "give", "back", "say", "let", "change", "ask", "stop",
             "skip", "import", "is", "be", "and", "or", "not", "yes", "no",
-            "nothing", "times", "at", "type", "has", "attempt", "rescue", "new"}
+            "nothing", "times", "at", "type", "has", "attempt", "rescue", "new",
+            "from"}
 
 
 def check_name(name, lineno):
@@ -1795,6 +1931,8 @@ def import_file(path):
 # ===========================================================================
 
 GLOBAL_ENV = Environment()
+GLOBAL_ENV.define("pi", math.pi)
+GLOBAL_ENV.define("e", math.e)
 
 
 def run_source(source):

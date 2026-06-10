@@ -16,10 +16,11 @@ an afternoon.
 
 It started as a toy. It isn't one anymore. Vanta has functions with default
 arguments and recursion, first-class and higher-order functions, user-defined
-types with methods, error handling, lists and maps, string interpolation, file
-and system access, modules, an interactive REPL, and a standard library of about
-sixty functions. There's a test suite in `tests/`. If you can write it in a
-scripting language, you can mostly write it in Vanta.
+types with inheritance, error handling, lists and maps, list comprehensions,
+string interpolation, regular expressions, file and system access, modules, an
+interactive REPL, and a standard library of around seventy functions. There's a
+test suite in `tests/`. If you can write it in a scripting language, you can
+mostly write it in Vanta.
 
 Here's what it looks like:
 
@@ -164,6 +165,32 @@ say d.speak()                 # Rex says Woof
 change d.name to "Max"
 ```
 
+Types can inherit from another type with `from`, override methods, and be
+checked with `is a`:
+
+```
+type Puppy from Dog
+    to speak()
+        give back me.name + " yips"
+    end
+end
+
+let pup be new Puppy("Tiny", "yip")
+say pup is a Dog              # yes  (inheritance)
+say pup is an Animal          # depends on the chain
+```
+
+### Comprehensions and regular expressions
+```
+let nums be [1, 2, 3, 4, 5]
+say [n * n for each n in nums]               # [1, 4, 9, 16, 25]
+say [n for each n in nums if n % 2 is 0]     # [2, 4]
+
+say matches("abc123", "[0-9]+")              # yes
+say find_all("cat hat bat", "[a-z]at")       # ["cat", "hat", "bat"]
+say replace_all("a1b2", "[0-9]", "#")        # a#b#
+```
+
 ### Handling errors
 Wrap risky code in `attempt` / `rescue`, and raise your own with `fail`:
 
@@ -206,8 +233,11 @@ numbers:  abs round floor ceil sqrt power min max random now
 lists:    first last range contains keys values sort reverse slice push pop
           remove_at
 higher:   map keep reduce each count_where find_where sort_by
-types:    type_of is_number is_text is_list is_map is_function is_nothing
+types:    type_of is_a is_number is_text is_list is_map is_function is_nothing
+regex:    matches find_all replace_all
+time:     now today clock
 errors:   fail assert
+constants: pi e
 system:   read_file write_file run shell arguments env make_dir remove_path
           list_dir path_exists copy_path to_json from_json interpreter
 ```
@@ -243,6 +273,7 @@ The `examples/` folder has a working program for each feature:
 | `mathtools.va` + `app.va` | a module and a program that imports it |
 | `system.va` | files and shell commands |
 | `objects.va` | a type with fields, methods, and `show` |
+| `shapes.va` | inheritance, polymorphism, and comprehensions |
 | `higher_order.va` | `map` / `keep` / `reduce` and passing functions |
 | `errors.va` | `attempt` / `rescue` and `fail` |
 | `guess.va` | a number-guessing game |
@@ -267,16 +298,17 @@ I'd rather be upfront about these than pretend they don't exist:
 - Strings are single-line (escapes like `\n` work, but a string can't span
   source lines), and every string interpolates — use `{{` for a literal brace.
 - Indexing is 0-based; `first(list)` and `last(list)` help if that trips you up.
-- No inheritance — types have fields and methods but don't extend each other.
-- The standard library covers the basics but is nowhere near Python's. The
+- Inheritance is single-parent with method override, but there's no `super`
+  to call the parent's version of a method yet.
+- The standard library covers a lot of ground but is nowhere near Python's. The
   *language* is real; the *ecosystem* is young.
 
 ## What's next
 
-- Type inheritance and a way to check "is this a Dog?"
+- A `super` call so an override can reach the parent method
+- Map comprehensions and multiple assignment
 - A package system so modules can be shared
 - A browser playground so you can try it with nothing installed
-- More of the standard library (dates, regular expressions, simple HTTP)
 
 ## Why I built it
 
