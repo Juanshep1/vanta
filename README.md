@@ -70,6 +70,23 @@ cd vanta
 don't want to use the launcher. Put the `vanta` directory on your `PATH` and you
 can just type `vanta` anywhere (`vanta.bat` is there for Windows).
 
+## Try it in your browser
+
+There's a [playground](playground/) that runs the *actual* `vanta.py` in the
+browser (via Pyodide — CPython compiled to WebAssembly). It has two modes: write
+and run Vanta code, or load a `.ch8` ROM into a **CHIP-8 emulator that is itself
+written in Vanta** (`emulator/chip8.va`). It plays real ROMs — the IBM logo,
+Breakout, and your own. To run it locally:
+
+```bash
+python3 -m http.server 8000     # from the repo root
+# open http://localhost:8000/playground/
+```
+
+There's also a small [macOS app](app/macos/) that wraps the playground in a
+native window, and an early [Game Boy CPU](gameboy/cpu.va) written in Vanta
+(a tested opcode core — not a working Game Boy yet; see its header for scope).
+
 ## A quick tour
 
 ### Variables and math
@@ -254,7 +271,8 @@ written in Vanta. To publish your own, drop a `.va` file (or a folder with a
 
 ```
 text:     length text number uppercase lowercase trim replace starts_with
-          ends_with find split lines pad_left pad_right join
+          ends_with find split lines pad_left pad_right join chr code
+bytes:    read_bytes band bor bxor bnot shift_left shift_right
 numbers:  abs round floor ceil sqrt power min max random now
 lists:    first last range contains keys values sort reverse slice push pop
           remove_at

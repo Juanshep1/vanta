@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.4
+- A **browser playground** (`playground/`) — run Vanta and play the emulator in
+  the browser via Pyodide; hostable on GitHub Pages
+- A **CHIP-8 emulator written entirely in Vanta** (`emulator/chip8.va`) that
+  loads and runs real `.ch8` ROMs, with opcode unit tests and an IBM-logo
+  golden-image test (`tools/chip8_headless.py`)
+- A **macOS app** (`app/macos/`) — a thin Swift WKWebView shell around the
+  playground
+- A **Game Boy CPU foundation** (`gameboy/cpu.va`) — registers, flags, cartridge
+  header parsing, and an opcode subset (work in progress; not playable)
+- New builtins: `read_bytes`; bitwise `band` `bor` `bxor` `bnot` `shift_left`
+  `shift_right`; `chr` / `code`; and a `call_vanta` host bridge
+
 ## 3.3
 - A `vanta` command-line tool: `vanta run`, `vanta repl`, `vanta version`,
   `vanta help` (plus `vanta program.va` and the old `python3 vanta.py`)
