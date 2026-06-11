@@ -1,0 +1,260 @@
+# ===========================================================================
+# Game Boy CPU (Sharp LR35902) — FOUNDATION / WORK IN PROGRESS.
+#
+# This is milestone 1: the CPU core only. It has the registers and flags, it
+# parses a cartridge header, and it runs a meaningful subset of the opcodes
+# (loads, INC/DEC, the common ALU operations, JP and JR).
+#
+# It is honestly NOT a working Game Boy yet, and it will not run games. Still
+# missing (future milestones): the rest of the ~500 opcodes incl. the CB set,
+# the PPU (graphics), sprites, memory-bank controllers, interrupts, timers,
+# and audio. A pure-Vanta interpreter is also far too slow to run games at
+# speed — this exists to prove the CPU can be written in Vanta and tested.
+# ===========================================================================
+
+to gb_zeros(n)
+    give back [0 for each i in range(n)]
+end
+
+to gb_new_state()
+    give back { "a": 0, "f": 0, "b": 0, "c": 0, "d": 0, "e": 0, "h": 0, "l": 0, "sp": 0, "pc": 0, "memory": gb_zeros(65536), "halted": no }
+end
+
+let gb be gb_new_state()
+
+to gb_init()
+    change gb to gb_new_state()
+end
+
+to gb_load(rom)
+    let i be 0
+    while i is under length(rom)
+        change gb["memory"][i] to rom[i]
+        change i to i + 1
+    end
+end
+
+# ---- 16-bit register pairs ------------------------------------------------
+
+to gb_hl()
+    give back bor(shift_left(gb["h"], 8), gb["l"])
+end
+
+to gb_set_hl(value)
+    change gb["h"] to band(shift_right(value, 8), 255)
+    change gb["l"] to band(value, 255)
+end
+
+to gb_set_bc(value)
+    change gb["b"] to band(shift_right(value, 8), 255)
+    change gb["c"] to band(value, 255)
+end
+
+to gb_set_de(value)
+    change gb["d"] to band(shift_right(value, 8), 255)
+    change gb["e"] to band(value, 255)
+end
+
+# ---- flags (stored in register F, bits 7=Z 6=N 5=H 4=C) -------------------
+
+to gb_flag(name)
+    let f be gb["f"]
+    if name is "z"
+        give back band(shift_right(f, 7), 1)
+    otherwise if name is "n"
+        give back band(shift_right(f, 6), 1)
+    otherwise if name is "h"
+        give back band(shift_right(f, 5), 1)
+    otherwise
+        give back band(shift_right(f, 4), 1)
+    end
+end
+
+to gb_set_flags(z, n, h, c)
+    let f be 0
+    if z
+        change f to bor(f, 128)
+    end
+    if n
+        change f to bor(f, 64)
+    end
+    if h
+        change f to bor(f, 32)
+    end
+    if c
+        change f to bor(f, 16)
+    end
+    change gb["f"] to f
+end
+
+# ---- generic register access (index 0..7 = B C D E H L (HL) A) ------------
+
+to reg_get(idx)
+    if idx is 0
+        give back gb["b"]
+    otherwise if idx is 1
+        give back gb["c"]
+    otherwise if idx is 2
+        give back gb["d"]
+    otherwise if idx is 3
+        give back gb["e"]
+    otherwise if idx is 4
+        give back gb["h"]
+    otherwise if idx is 5
+        give back gb["l"]
+    otherwise if idx is 6
+        give back gb["memory"][gb_hl()]
+    otherwise
+        give back gb["a"]
+    end
+end
+
+to reg_set(idx, value)
+    let v be band(value, 255)
+    if idx is 0
+        change gb["b"] to v
+    otherwise if idx is 1
+        change gb["c"] to v
+    otherwise if idx is 2
+        change gb["d"] to v
+    otherwise if idx is 3
+        change gb["e"] to v
+    otherwise if idx is 4
+        change gb["h"] to v
+    otherwise if idx is 5
+        change gb["l"] to v
+    otherwise if idx is 6
+        change gb["memory"][gb_hl()] to v
+    otherwise
+        change gb["a"] to v
+    end
+end
+
+# ---- fetch ----------------------------------------------------------------
+
+to gb_fetch_byte()
+    let value be gb["memory"][gb["pc"]]
+    change gb["pc"] to band(gb["pc"] + 1, 65535)
+    give back value
+end
+
+to gb_fetch_word()
+    let low be gb_fetch_byte()
+    let high be gb_fetch_byte()
+    give back bor(shift_left(high, 8), low)
+end
+
+# ---- ALU (operation index 0=ADD 2=SUB 4=AND 5=XOR 6=OR 7=CP) --------------
+
+to gb_alu(operation, value)
+    let a be gb["a"]
+    if operation is 0
+        let result be a + value
+        gb_set_flags(band(result, 255) is 0, no, band(a, 15) + band(value, 15) is over 15, result is over 255)
+        change gb["a"] to band(result, 255)
+    otherwise if operation is 2
+        gb_set_flags(band(a - value, 255) is 0, yes, band(a, 15) is under band(value, 15), a is under value)
+        change gb["a"] to band(a - value, 255)
+    otherwise if operation is 4
+        change gb["a"] to band(a, value)
+        gb_set_flags(gb["a"] is 0, no, yes, no)
+    otherwise if operation is 5
+        change gb["a"] to bxor(a, value)
+        gb_set_flags(gb["a"] is 0, no, no, no)
+    otherwise if operation is 6
+        change gb["a"] to bor(a, value)
+        gb_set_flags(gb["a"] is 0, no, no, no)
+    otherwise if operation is 7
+        gb_set_flags(band(a - value, 255) is 0, yes, band(a, 15) is under band(value, 15), a is under value)
+    end
+end
+
+to gb_inc(idx)
+    let old be reg_get(idx)
+    let value be band(old + 1, 255)
+    gb_set_flags(value is 0, no, band(old, 15) is 15, gb_flag("c") is 1)
+    reg_set(idx, value)
+end
+
+to gb_dec(idx)
+    let old be reg_get(idx)
+    let value be band(old - 1, 255)
+    gb_set_flags(value is 0, yes, band(old, 15) is 0, gb_flag("c") is 1)
+    reg_set(idx, value)
+end
+
+to gb_jr(condition)
+    let offset be gb_fetch_byte()
+    if offset is over 127
+        change offset to offset - 256
+    end
+    if condition
+        change gb["pc"] to band(gb["pc"] + offset, 65535)
+    end
+end
+
+# ---- step / decode --------------------------------------------------------
+
+to gb_step()
+    gb_execute(gb_fetch_byte())
+end
+
+to gb_execute(op)
+    if op is 0
+        skip_nothing()
+    otherwise if op is 1
+        gb_set_bc(gb_fetch_word())
+    otherwise if op is 17
+        gb_set_de(gb_fetch_word())
+    otherwise if op is 33
+        gb_set_hl(gb_fetch_word())
+    otherwise if op is 49
+        change gb["sp"] to gb_fetch_word()
+    otherwise if op is 195
+        change gb["pc"] to gb_fetch_word()
+    otherwise if op is 24
+        gb_jr(yes)
+    otherwise if op is 32
+        gb_jr(gb_flag("z") is 0)
+    otherwise if op is 40
+        gb_jr(gb_flag("z") is 1)
+    otherwise if op is 48
+        gb_jr(gb_flag("c") is 0)
+    otherwise if op is 56
+        gb_jr(gb_flag("c") is 1)
+    otherwise if band(op, 199) is 6
+        reg_set(band(shift_right(op, 3), 7), gb_fetch_byte())
+    otherwise if band(op, 199) is 4
+        gb_inc(band(shift_right(op, 3), 7))
+    otherwise if band(op, 199) is 5
+        gb_dec(band(shift_right(op, 3), 7))
+    otherwise if op is at least 64 and op is at most 127
+        if op is 118
+            change gb["halted"] to yes
+        otherwise
+            reg_set(band(shift_right(op, 3), 7), reg_get(band(op, 7)))
+        end
+    otherwise if op is at least 128 and op is at most 191
+        gb_alu(band(shift_right(op, 3), 7), reg_get(band(op, 7)))
+    otherwise
+        change gb["halted"] to yes
+    end
+end
+
+to skip_nothing()
+    give back nothing
+end
+
+# ---- cartridge header -----------------------------------------------------
+
+to gb_header(rom)
+    let title be ""
+    let i be 308
+    while i is at most 323
+        if rom[i] is over 0
+            change title to title + chr(rom[i])
+        end
+        change i to i + 1
+    end
+    give back { "title": trim(title), "cartridge_type": rom[327], "rom_size": rom[328], "header_checksum": rom[333] }
+end
