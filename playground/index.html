@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vanta Playground</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+</head>
+<body>
+<header>
+  <h1>Vanta <span>Playground</span></h1>
+  <p class="tagline">A plain-English language &mdash; and a CHIP-8 emulator written in it &mdash; running in your browser.</p>
+  <p id="status" class="status">Loading the Vanta interpreter&hellip;</p>
+</header>
+
+<nav class="tabs">
+  <button data-tab="code" class="active">Code</button>
+  <button data-tab="emulator">Emulator</button>
+</nav>
+
+<main>
+  <section id="code" class="tab active">
+    <div class="editor">
+      <textarea id="source" spellcheck="false"># Welcome to Vanta. Edit this and press Run.
+say "Hello from Vanta, running in your browser!"
+
+to fib(n)
+    if n is under 2
+        give back n
+    end
+    give back fib(n - 1) + fib(n - 2)
+end
+
+say "First 10 Fibonacci numbers:"
+say [fib(n) for each n in range(0, 10)]
+
+type Greeter
+    has name
+    to hello()
+        give back "Hi, I am " + me.name
+    end
+end
+
+let g be new Greeter("Vanta")
+say g.hello()
+</textarea>
+      <div class="controls">
+        <button id="run" disabled>Run</button>
+      </div>
+    </div>
+    <pre id="output" aria-label="output"></pre>
+  </section>
+
+  <section id="emulator" class="tab">
+    <canvas id="screen" width="640" height="320"></canvas>
+    <div class="controls">
+      <select id="rom">
+        <option value="../roms/ibm-logo.ch8">IBM logo (test)</option>
+        <option value="../roms/corax-opcode-test.ch8">Opcode test (corax+)</option>
+        <option value="../roms/breakout.ch8">Breakout</option>
+        <option value="../roms/glitchghost.ch8">Glitch Ghost</option>
+      </select>
+      <button id="load" disabled>Load &amp; Run</button>
+      <button id="stop" disabled>Stop</button>
+      <label class="file">Open ROM&hellip;<input type="file" id="file" accept=".ch8,.rom,application/octet-stream"></label>
+      <span class="speed">Speed <input type="range" id="speed" min="2" max="40" value="14"></span>
+    </div>
+    <p class="keys">Keys: <code>1 2 3 4</code> / <code>Q W E R</code> / <code>A S D F</code> / <code>Z X C V</code>
+      map to the CHIP-8 hex pad. The whole CPU is <code>emulator/chip8.va</code> &mdash; pure Vanta.</p>
+  </section>
+</main>
+
+<footer>
+  <a href="https://github.com/Juanshep1/vanta">github.com/Juanshep1/vanta</a>
+  &middot; the interpreter and the emulator are both Vanta
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
