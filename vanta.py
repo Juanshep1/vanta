@@ -51,9 +51,11 @@ PHRASES = {
     ("is", "more", "than"): ">",
     ("is", "less", "than"): "<",
     ("is", "smaller", "than"): "<",
+    ("is", "not", "in"): "notin",
     ("is", "not"): "!=",
     ("is", "a"): "isa",
     ("is", "an"): "isa",
+    ("is", "in"): "in",
     ("is", "over"): ">",
     ("is", "above"): ">",
     ("is", "under"): "<",
@@ -195,7 +197,15 @@ class Parser:
         return k == "NAME" and v.lower() == word
 
     def parse_expression(self):
-        return self.parse_or()
+        node = self.parse_or()
+        if self.is_word("if"):                 # inline conditional: A if COND otherwise B
+            self.take()
+            cond = self.parse_or()
+            if not self.is_word("otherwise"):
+                raise VantaError("an inline 'if' needs an 'otherwise' value")
+            self.take()
+            return ("ternary", cond, node, self.parse_expression())
+        return node
 
     def parse_or(self):
         node = self.parse_and()
@@ -223,6 +233,9 @@ class Parser:
         if k == "OP" and v == "isa":
             self.take()
             return ("isa", left, self.parse_add_sub())
+        if k == "OP" and v in ("in", "notin"):
+            self.take()
+            return (v, left, self.parse_add_sub())
         if k == "OP" and v in COMPARE_OPS:
             self.take()
             return ("cmp", v, left, self.parse_add_sub())
@@ -320,7 +333,7 @@ class Parser:
             if not self.is_word("in"):
                 raise VantaError("a comprehension needs 'in' before the list")
             self.take()
-            iter_expr = self.parse_expression()
+            iter_expr = self.parse_or()    # not parse_expression: leave the filter 'if' alone
             cond = None
             if self.is_word("if"):
                 self.take()
@@ -367,7 +380,7 @@ class Parser:
             if not self.is_word("in"):
                 raise VantaError("a comprehension needs 'in' before the list")
             self.take()
-            iter_expr = self.parse_expression()
+            iter_expr = self.parse_or()    # not parse_expression: leave the filter 'if' alone
             cond = None
             if self.is_word("if"):
                 self.take()
@@ -453,8 +466,8 @@ def parse_expr_text(text, lineno):
 # STAGE 2b - STATEMENT PARSER  (lines -> list of statements)
 # ===========================================================================
 
-BLOCK_TERMINATORS = ("end", "otherwise", "rescue")
-BLOCK_OPENERS = ("if", "repeat", "while", "for", "to", "attempt", "type")
+BLOCK_TERMINATORS = ("end", "otherwise", "rescue", "when")
+BLOCK_OPENERS = ("if", "repeat", "while", "for", "to", "attempt", "type", "match")
 
 
 def first_word(line):
@@ -530,12 +543,31 @@ def parse_one(lines, pos):
         after = rest[len("each "):]
         if " in " not in after:
             raise VantaError(f"line {lineno}: use: for each NAME in LIST")
-        name, _, iter_text = after.partition(" in ")
-        check_name(name.strip(), lineno)
+        names_text, _, iter_text = after.partition(" in ")
+        names = [n.strip() for n in names_text.split(",")]
+        for nm in names:
+            check_name(nm, lineno)
         body, pos = parse_block(lines, pos + 1)
         pos = expect_end(lines, pos, "for")
-        return ("foreach", lineno, name.strip(),
-                parse_expr_text(iter_text, lineno), body), pos
+        if len(names) == 1:
+            return ("foreach", lineno, names[0],
+                    parse_expr_text(iter_text, lineno), body), pos
+        if len(names) == 2:
+            return ("foreach2", lineno, names[0], names[1],
+                    parse_expr_text(iter_text, lineno), body), pos
+        raise VantaError(f"line {lineno}: 'for each' takes one or two names")
+
+    if head == "increase" or head == "decrease":
+        if " by " not in rest:
+            raise VantaError(f"line {lineno}: use: {head} NAME by AMOUNT")
+        target, _, amount_text = rest.partition(" by ")
+        sign = "+" if head == "increase" else "-"
+        target_node = parse_expr_text(target.strip(), lineno)
+        amount = parse_expr_text(amount_text, lineno)
+        return ("mutate", lineno, target_node, sign, amount), pos + 1
+
+    if head == "match":
+        return parse_match(lines, pos)
 
     if head == "to":
         name, params = parse_signature(rest, lineno)
@@ -638,6 +670,29 @@ def parse_if(lines, pos):
             break
     pos = expect_end(lines, pos, "if")
     return ("if", lineno, branches, else_body), pos
+
+
+def parse_match(lines, pos):
+    lineno, text = lines[pos]
+    subject = parse_expr_text(text[len("match"):].strip(), lineno)
+    branches, else_body = [], []
+    pos += 1
+    while pos < len(lines):
+        head = first_word(lines[pos][1])
+        if head == "when":
+            value = parse_expr_text(lines[pos][1][len("when"):].strip(), lines[pos][0])
+            body, pos = parse_block(lines, pos + 1)
+            branches.append((value, body))
+        elif head == "otherwise":
+            else_body, pos = parse_block(lines, pos + 1)
+            break
+        elif head == "end":
+            break
+        else:
+            raise VantaError(f"line {lines[pos][0]}: inside 'match', "
+                             f"use 'when VALUE' or 'otherwise'")
+    pos = expect_end(lines, pos, "match")
+    return ("match", lineno, subject, branches, else_body), pos
 
 
 def parse_type(lines, pos):
@@ -895,6 +950,33 @@ def _run_stmt(stmt, env):
             except ContinueLoop:
                 continue
 
+    elif tag == "foreach2":
+        _, _, name1, name2, iter_node, body = stmt
+        for first, second in iterate_pairs(eval_expr(iter_node, env)):
+            env.define(name1, first)
+            env.define(name2, second)
+            try:
+                run_block(body, env)
+            except BreakLoop:
+                break
+            except ContinueLoop:
+                continue
+
+    elif tag == "mutate":
+        _, _, target_node, sign, amount_node = stmt
+        current = eval_expr(target_node, env)
+        new_value = arithmetic(sign, current, eval_expr(amount_node, env))
+        do_assign(target_node, new_value, env)
+
+    elif tag == "match":
+        _, _, subject_node, branches, else_body = stmt
+        subject = eval_expr(subject_node, env)
+        for value_node, body in branches:
+            if subject == eval_expr(value_node, env):
+                run_block(body, env)
+                return
+        run_block(else_body, env)
+
     elif tag == "func":
         _, _, name, params, body = stmt
         env.define(name, Function(name, params, body))
@@ -1012,6 +1094,16 @@ def eval_expr(node, env):
         if not isinstance(target, VantaType):
             raise VantaError("the right side of 'is a' must be a type")
         return is_instance_of(eval_expr(node[1], env), target)
+
+    if tag == "ternary":
+        return eval_expr(node[2], env) if truthy(eval_expr(node[1], env)) \
+            else eval_expr(node[3], env)
+
+    if tag == "in":
+        return is_member(eval_expr(node[1], env), eval_expr(node[2], env))
+
+    if tag == "notin":
+        return not is_member(eval_expr(node[1], env), eval_expr(node[2], env))
 
     if tag == "listcomp":
         _, out_expr, var, iter_expr, cond = node
@@ -1203,6 +1295,12 @@ def arithmetic(op, a, b):
             return display(a) + display(b)
         check_numbers(a, b, "+")
         return a + b
+    if op == "*":
+        # text/list repetition: "ab" * 3, [0] * 4
+        if isinstance(a, (str, list)) and isinstance(b, int) and not isinstance(b, bool):
+            return a * b
+        if isinstance(b, (str, list)) and isinstance(a, int) and not isinstance(a, bool):
+            return b * a
     check_numbers(a, b, op)
     if op == "-":
         return a - b
@@ -1269,9 +1367,25 @@ def set_index(collection, index, value):
 def whole_index(index, length):
     if isinstance(index, bool) or not isinstance(index, int):
         raise VantaError("a position must be a whole number")
-    if index < 0 or index >= length:
-        raise VantaError(f"position {index} is outside the range 0..{length - 1}")
-    return index
+    resolved = index + length if index < 0 else index   # -1 means the last item
+    if resolved < 0 or resolved >= length:
+        raise VantaError(f"position {index} is outside the range "
+                         f"-{length}..{length - 1}")
+    return resolved
+
+
+def is_member(value, collection):
+    if isinstance(collection, (list, str, dict)):
+        return value in collection
+    raise VantaError("'in' needs a list, text, or map on the right side")
+
+
+def iterate_pairs(value):
+    if isinstance(value, dict):
+        return list(value.items())
+    if isinstance(value, (list, str)):
+        return list(enumerate(value))
+    raise VantaError("looping with two names needs a map, list, or text")
 
 
 def iterate(value):
@@ -2074,7 +2188,7 @@ RESERVED = {"if", "end", "otherwise", "repeat", "while", "for", "each", "in",
             "to", "give", "back", "say", "let", "change", "ask", "stop",
             "skip", "import", "is", "be", "and", "or", "not", "yes", "no",
             "nothing", "times", "at", "type", "has", "attempt", "rescue", "new",
-            "from", "super"}
+            "from", "super", "match", "when", "increase", "decrease", "by"}
 
 
 def check_name(name, lineno):

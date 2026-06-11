@@ -118,6 +118,22 @@ Comparisons read how you'd say them: `is`, `is not`, `is over`, `is under`,
 `is at least`, `is at most`, `is bigger than`, `is less than`. Logic is `and`,
 `or`, `not`.
 
+There's an inline version (a value, not a block), and a `match` for picking among
+fixed cases:
+
+```
+let grade be "pass" if score is at least 60 otherwise "fail"
+
+match command
+    when "start"
+        say "starting"
+    when "stop"
+        say "stopping"
+    otherwise
+        say "unknown"
+end
+```
+
 ### Loops
 ```
 repeat 3 times
@@ -128,8 +144,12 @@ for each item in ["a", "b", "c"]
     say item
 end
 
+for each key, value in { "a": 1, "b": 2 }   # two names: key + value
+    say key + " = " + value
+end
+
 while count is over 0
-    change count to count minus 1
+    decrease count by 1                      # also: increase x by n
 end
 ```
 
@@ -233,11 +253,16 @@ end
 let scores be [10, 20, 30]
 add 40 to scores
 change scores at 0 to 99
-say scores[0]
+say scores[0]                  # first item
+say scores[-1]                 # last item (negative indexing)
+say 99 is in scores            # membership test -> yes
+say [n * 2 for each n in scores]
+say [0] * 5                    # repeat -> [0, 0, 0, 0, 0]
 
 let person be { "name": "Juan", "age": 25 }
 change person at "age" to 26
 say person["name"]
+say "age" is in person         # is there such a key? -> yes
 ```
 
 ### Talking to the outside world

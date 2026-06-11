@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.5
+- Inline conditional expression: `"big" if n is over 100 otherwise "small"`
+- A `match` / `when` statement for testing a value against several cases
+- Membership operators: `x is in collection`, `x is not in collection`
+- Negative indexing: `list[-1]` is the last item
+- `*` repeats text and lists: `"ab" * 3`, `[0] * 4`
+- Two-name loops: `for each key, value in map` (and `index, item` over lists/text)
+- `increase X by N` / `decrease X by N`
+
 ## 3.4
 - A **browser playground** (`playground/`) — run Vanta and play the emulator in
   the browser via Pyodide; hostable on GitHub Pages
