@@ -1,0 +1,287 @@
+# ===========================================================================
+# CHIP-8 emulator, written entirely in Vanta.
+#
+# CHIP-8 is a tiny 1970s virtual machine: 4 KB of memory, 16 registers, a
+# 64x32 monochrome display, and a 16-key hex keypad. Real .ch8 ROMs (Pong,
+# Tetris, Space Invaders, Brix) run on it.
+#
+# This file is pure Vanta. The display, keyboard, and frame timing come from
+# the host (the browser playground), which calls these functions:
+#   chip8_init()              reset the machine
+#   chip8_load(bytes)         load a ROM (a list of whole numbers 0..255)
+#   chip8_step(cycles)        run N CPU cycles, then tick the timers
+#   chip8_key(index, down)    set a keypad key (0..15) up/down
+#   chip8_display()           get the 64x32 screen as a flat list of 2048 0/1
+#   chip8_sound()             nonzero while the buzzer should sound
+# ===========================================================================
+
+to zeros(n)
+    give back [0 for each i in range(n)]
+end
+
+# The built-in font: 16 characters (0-F), 5 bytes each, as one flat list.
+to chip8_font()
+    give back [240, 144, 144, 144, 240, 32, 96, 32, 32, 112, 240, 16, 240, 128, 240, 240, 16, 240, 16, 240, 144, 144, 240, 16, 16, 240, 128, 240, 16, 240, 240, 128, 240, 144, 240, 240, 16, 32, 64, 64, 240, 144, 240, 144, 240, 240, 144, 240, 16, 240, 240, 144, 240, 144, 144, 224, 144, 224, 144, 224, 240, 128, 128, 128, 240, 224, 144, 144, 144, 224, 240, 128, 240, 128, 240, 240, 128, 240, 128, 128]
+end
+
+to chip8_new_state()
+    let state be { "memory": zeros(4096), "V": zeros(16), "I": 0, "pc": 512, "sp": 0, "stack": zeros(16), "delay": 0, "sound": 0, "display": zeros(2048), "keys": zeros(16) }
+    let font be chip8_font()
+    let i be 0
+    while i is under length(font)
+        change state["memory"][80 + i] to font[i]
+        change i to i + 1
+    end
+    give back state
+end
+
+# The one machine. Host functions all read and write this.
+let cpu be chip8_new_state()
+
+to chip8_init()
+    change cpu to chip8_new_state()
+end
+
+to chip8_load(rom)
+    let i be 0
+    while i is under length(rom)
+        change cpu["memory"][512 + i] to rom[i]
+        change i to i + 1
+    end
+end
+
+to chip8_key(index, down)
+    if down
+        change cpu["keys"][index] to 1
+    otherwise
+        change cpu["keys"][index] to 0
+    end
+end
+
+to chip8_display()
+    give back cpu["display"]
+end
+
+to chip8_sound()
+    give back cpu["sound"]
+end
+
+to chip8_update_timers()
+    if cpu["delay"] is over 0
+        change cpu["delay"] to cpu["delay"] - 1
+    end
+    if cpu["sound"] is over 0
+        change cpu["sound"] to cpu["sound"] - 1
+    end
+end
+
+to chip8_step(cycles)
+    let n be 0
+    while n is under cycles
+        chip8_cycle()
+        change n to n + 1
+    end
+    chip8_update_timers()
+end
+
+to chip8_cycle()
+    let memory be cpu["memory"]
+    let pc be cpu["pc"]
+    let op be bor(shift_left(memory[pc], 8), memory[pc + 1])
+    change cpu["pc"] to pc + 2
+    chip8_execute(op)
+end
+
+to chip8_execute(op)
+    let prefix be band(shift_right(op, 12), 15)
+    let x be band(shift_right(op, 8), 15)
+    let y be band(shift_right(op, 4), 15)
+    let n be band(op, 15)
+    let kk be band(op, 255)
+    let nnn be band(op, 4095)
+    let V be cpu["V"]
+
+    if prefix is 0
+        if op is 224
+            chip8_clear()
+        otherwise if op is 238
+            change cpu["sp"] to cpu["sp"] - 1
+            change cpu["pc"] to cpu["stack"][cpu["sp"]]
+        end
+    otherwise if prefix is 1
+        change cpu["pc"] to nnn
+    otherwise if prefix is 2
+        change cpu["stack"][cpu["sp"]] to cpu["pc"]
+        change cpu["sp"] to cpu["sp"] + 1
+        change cpu["pc"] to nnn
+    otherwise if prefix is 3
+        if V[x] is kk
+            change cpu["pc"] to cpu["pc"] + 2
+        end
+    otherwise if prefix is 4
+        if V[x] is not kk
+            change cpu["pc"] to cpu["pc"] + 2
+        end
+    otherwise if prefix is 5
+        if V[x] is V[y]
+            change cpu["pc"] to cpu["pc"] + 2
+        end
+    otherwise if prefix is 6
+        change V[x] to kk
+    otherwise if prefix is 7
+        change V[x] to band(V[x] + kk, 255)
+    otherwise if prefix is 8
+        chip8_alu(x, y, n)
+    otherwise if prefix is 9
+        if V[x] is not V[y]
+            change cpu["pc"] to cpu["pc"] + 2
+        end
+    otherwise if prefix is 10
+        change cpu["I"] to nnn
+    otherwise if prefix is 11
+        change cpu["pc"] to band(nnn + V[0], 4095)
+    otherwise if prefix is 12
+        change V[x] to band(random(0, 255), kk)
+    otherwise if prefix is 13
+        chip8_draw(V[x], V[y], n)
+    otherwise if prefix is 14
+        if kk is 158
+            if cpu["keys"][V[x]] is 1
+                change cpu["pc"] to cpu["pc"] + 2
+            end
+        otherwise if kk is 161
+            if cpu["keys"][V[x]] is 0
+                change cpu["pc"] to cpu["pc"] + 2
+            end
+        end
+    otherwise if prefix is 15
+        chip8_misc(x, kk)
+    end
+end
+
+to chip8_clear()
+    let display be cpu["display"]
+    let i be 0
+    while i is under 2048
+        change display[i] to 0
+        change i to i + 1
+    end
+end
+
+to chip8_alu(x, y, n)
+    let V be cpu["V"]
+    if n is 0
+        change V[x] to V[y]
+    otherwise if n is 1
+        change V[x] to bor(V[x], V[y])
+    otherwise if n is 2
+        change V[x] to band(V[x], V[y])
+    otherwise if n is 3
+        change V[x] to bxor(V[x], V[y])
+    otherwise if n is 4
+        let total be V[x] + V[y]
+        change V[x] to band(total, 255)
+        if total is over 255
+            change V[15] to 1
+        otherwise
+            change V[15] to 0
+        end
+    otherwise if n is 5
+        let flag be 0
+        if V[x] is at least V[y]
+            change flag to 1
+        end
+        change V[x] to band(V[x] - V[y], 255)
+        change V[15] to flag
+    otherwise if n is 6
+        let flag be band(V[x], 1)
+        change V[x] to shift_right(V[x], 1)
+        change V[15] to flag
+    otherwise if n is 7
+        let flag be 0
+        if V[y] is at least V[x]
+            change flag to 1
+        end
+        change V[x] to band(V[y] - V[x], 255)
+        change V[15] to flag
+    otherwise if n is 14
+        let flag be band(shift_right(V[x], 7), 1)
+        change V[x] to band(shift_left(V[x], 1), 255)
+        change V[15] to flag
+    end
+end
+
+to chip8_draw(vx, vy, height)
+    let display be cpu["display"]
+    let memory be cpu["memory"]
+    let base be cpu["I"]
+    change cpu["V"][15] to 0
+    let row be 0
+    while row is under height
+        let sprite be memory[base + row]
+        let col be 0
+        while col is under 8
+            if band(sprite, shift_right(128, col)) is not 0
+                let px be (vx + col) % 64
+                let py be (vy + row) % 32
+                let index be py * 64 + px
+                if display[index] is 1
+                    change cpu["V"][15] to 1
+                end
+                change display[index] to bxor(display[index], 1)
+            end
+            change col to col + 1
+        end
+        change row to row + 1
+    end
+end
+
+to chip8_misc(x, kk)
+    let V be cpu["V"]
+    if kk is 7
+        change V[x] to cpu["delay"]
+    otherwise if kk is 10
+        chip8_wait_key(x)
+    otherwise if kk is 21
+        change cpu["delay"] to V[x]
+    otherwise if kk is 24
+        change cpu["sound"] to V[x]
+    otherwise if kk is 30
+        change cpu["I"] to band(cpu["I"] + V[x], 65535)
+    otherwise if kk is 41
+        change cpu["I"] to 80 + V[x] * 5
+    otherwise if kk is 51
+        let value be V[x]
+        change cpu["memory"][cpu["I"]] to floor(value / 100)
+        change cpu["memory"][cpu["I"] + 1] to floor(value / 10) % 10
+        change cpu["memory"][cpu["I"] + 2] to value % 10
+    otherwise if kk is 85
+        let i be 0
+        while i is at most x
+            change cpu["memory"][cpu["I"] + i] to V[i]
+            change i to i + 1
+        end
+    otherwise if kk is 101
+        let i be 0
+        while i is at most x
+            change V[i] to cpu["memory"][cpu["I"] + i]
+            change i to i + 1
+        end
+    end
+end
+
+to chip8_wait_key(x)
+    let found be -1
+    let k be 0
+    while k is under 16
+        if cpu["keys"][k] is 1
+            change found to k
+        end
+        change k to k + 1
+    end
+    if found is -1
+        change cpu["pc"] to cpu["pc"] - 2
+    otherwise
+        change cpu["V"][x] to found
+    end
+end

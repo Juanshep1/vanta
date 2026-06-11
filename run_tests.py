@@ -56,6 +56,19 @@ def main():
             print("        " + (result.stdout + result.stderr).strip())
             failed += 1
 
+    print("\nheadless harnesses")
+    for harness in ["tools/chip8_headless.py"]:
+        result = subprocess.run([sys.executable, os.path.join(HERE, harness)],
+                                capture_output=True, text=True)
+        name = os.path.basename(harness)
+        if result.returncode == 0:
+            print(f"  PASS  {name}")
+            passed += 1
+        else:
+            print(f"  FAIL  {name}")
+            print("        " + (result.stdout + result.stderr).strip())
+            failed += 1
+
     print(f"\n{passed} passed, {failed} failed")
     sys.exit(1 if failed else 0)
 
