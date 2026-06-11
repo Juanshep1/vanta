@@ -1426,6 +1426,22 @@ def b_lines(args):
     return display(args[0]).split("\n")
 
 
+def b_chr(args):
+    _need(args, 1, "chr")
+    n = int_arg(args[0], "chr")
+    if n < 0 or n > 0x10FFFF:
+        raise VantaError("chr needs a number from 0 to 1114111")
+    return chr(n)
+
+
+def b_code(args):
+    _need(args, 1, "code")
+    text = display(args[0])
+    if len(text) == 0:
+        raise VantaError("code needs a non-empty text value")
+    return ord(text[0])
+
+
 def b_pad_left(args):
     if len(args) not in (2, 3):
         raise VantaError("pad_left expects text, a width, and an optional character")
@@ -1831,6 +1847,48 @@ def b_interpreter(args):
     return os.path.abspath(sys.argv[0])
 
 
+# ---- bytes and bitwise (needed for emulators and low-level work) ---------
+
+def b_read_bytes(args):
+    _need(args, 1, "read_bytes")
+    try:
+        with open(display(args[0]), "rb") as f:
+            return list(f.read())          # a list of whole numbers 0..255
+    except OSError as e:
+        raise VantaError(f"could not read file: {e}")
+
+
+def b_band(args):
+    _need(args, 2, "band")
+    return int_arg(args[0], "band") & int_arg(args[1], "band")
+
+
+def b_bor(args):
+    _need(args, 2, "bor")
+    return int_arg(args[0], "bor") | int_arg(args[1], "bor")
+
+
+def b_bxor(args):
+    _need(args, 2, "bxor")
+    return int_arg(args[0], "bxor") ^ int_arg(args[1], "bxor")
+
+
+def b_bnot(args):
+    _need(args, 2, "bnot")
+    value, bits = int_arg(args[0], "bnot"), int_arg(args[1], "bnot")
+    return (~value) & ((1 << bits) - 1)
+
+
+def b_shift_left(args):
+    _need(args, 2, "shift_left")
+    return int_arg(args[0], "shift_left") << int_arg(args[1], "shift_left")
+
+
+def b_shift_right(args):
+    _need(args, 2, "shift_right")
+    return int_arg(args[0], "shift_right") >> int_arg(args[1], "shift_right")
+
+
 # ---- type checks ---------------------------------------------------------
 
 def b_is_a(args):
@@ -1892,6 +1950,7 @@ BUILTINS = {
     "replace": b_replace, "starts_with": b_starts_with, "ends_with": b_ends_with,
     "find": b_find, "split": b_split, "lines": b_lines,
     "pad_left": b_pad_left, "pad_right": b_pad_right,
+    "chr": b_chr, "code": b_code,
     # numbers
     "abs": b_abs, "round": b_round, "floor": b_floor, "ceil": b_ceil,
     "sqrt": b_sqrt, "power": b_power, "min": b_min, "max": b_max,
@@ -1912,6 +1971,9 @@ BUILTINS = {
     "make_dir": b_make_dir, "remove_path": b_remove_path, "list_dir": b_list_dir,
     "path_exists": b_path_exists, "copy_path": b_copy_path,
     "to_json": b_to_json, "from_json": b_from_json, "interpreter": b_interpreter,
+    # bytes & bitwise
+    "read_bytes": b_read_bytes, "band": b_band, "bor": b_bor, "bxor": b_bxor,
+    "bnot": b_bnot, "shift_left": b_shift_left, "shift_right": b_shift_right,
 }
 
 # A first-class value for every builtin, so they can be passed to map/keep/etc.
@@ -2079,6 +2141,17 @@ def import_file(name):
 GLOBAL_ENV = Environment()
 GLOBAL_ENV.define("pi", math.pi)
 GLOBAL_ENV.define("e", math.e)
+
+
+def call_vanta(name, args):
+    """Call a Vanta function (or builtin) by name from host code (used by the
+    browser playground to drive the emulator). Returns the function's value."""
+    fn = GLOBAL_ENV.get(name)
+    if fn is _MISSING:
+        fn = BUILTIN_VALUES.get(name, _MISSING)
+    if fn is _MISSING:
+        raise VantaError(f"no function named '{name}'")
+    return apply_callable(fn, list(args))
 
 
 def run_source(source):
