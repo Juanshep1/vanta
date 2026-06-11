@@ -101,6 +101,8 @@ say 10 % 3              # remainder
 
 let a, b be [1, 2]      # unpack a list into several names
 change a, b to b, a     # swap, all at once
+
+fix pi_ish be 3.14159   # a constant: 'change' on it is an error
 ```
 
 ### Decisions
@@ -166,6 +168,20 @@ end
 
 say greet("world")            # Hello, world
 say greet("world", "Hey")     # Hey, world
+```
+
+You can also write a function inline with `make`, and functions are real
+closures — they remember the scope they were made in:
+
+```
+let double be make x give x * 2
+say map(double, [1, 2, 3])    # [2, 4, 6]
+
+to multiplier(factor)
+    give back make x give x * factor   # captures factor
+end
+let triple be multiplier(3)
+say triple(10)                # 30
 ```
 
 ### Strings that fill themselves in
@@ -255,6 +271,7 @@ add 40 to scores
 change scores at 0 to 99
 say scores[0]                  # first item
 say scores[-1]                 # last item (negative indexing)
+say scores[1:3]                # a slice (items 1 and 2)
 say 99 is in scores            # membership test -> yes
 say [n * 2 for each n in scores]
 say [0] * 5                    # repeat -> [0, 0, 0, 0, 0]
@@ -298,10 +315,12 @@ written in Vanta. To publish your own, drop a `.va` file (or a folder with a
 text:     length text number uppercase lowercase trim replace starts_with
           ends_with find split lines pad_left pad_right join chr code
 bytes:    read_bytes band bor bxor bnot shift_left shift_right
-numbers:  abs round floor ceil sqrt power min max random now
+numbers:  abs round floor ceil sqrt power sin cos tan log exp min max
+          sum product random now
 lists:    first last range contains keys values sort reverse slice push pop
           remove_at
 higher:   map keep reduce each count_where find_where sort_by
+modules:  import "math" / "lists" / "text" / "random" (the bundled lib/)
 types:    type_of is_a is_number is_text is_list is_map is_function is_nothing
 regex:    matches find_all replace_all
 time:     now today clock

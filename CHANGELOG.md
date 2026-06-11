@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.6
+- Anonymous functions: `make x give x * 2`
+- Proper lexical closures — a function (named or anonymous) captures the scope
+  it was defined in, so you can build counters, multipliers, and the like
+- Slice syntax: `list[1:3]`, `text[2:]`, `xs[:2]`, `xs[-2:]`
+- Constants: `fix limit be 100` (can't be reassigned)
+- New math builtins: `sin` `cos` `tan` `log` `exp` `sum` `product`
+- A `random` library module: `shuffle` `choice` `sample` `roll` `chance`
+- `math` library additions: `to_radians` `to_degrees` `hypotenuse`
+
 ## 3.5
 - Inline conditional expression: `"big" if n is over 100 otherwise "small"`
 - A `match` / `when` statement for testing a value against several cases

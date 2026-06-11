@@ -46,3 +46,15 @@ end
 to is_even(n)
     give back n % 2 is 0
 end
+
+to to_radians(degrees)
+    give back degrees * pi / 180
+end
+
+to to_degrees(radians)
+    give back radians * 180 / pi
+end
+
+to hypotenuse(a, b)
+    give back sqrt(a * a + b * b)
+end

@@ -259,10 +259,24 @@ class Parser:
         if self.peek() == ("OP", "-"):
             self.take()
             return ("neg", self.parse_unary())
+        if self.is_word("make"):          # anonymous function: make x give x * 2
+            return self.parse_lambda()
         if self.is_word("new"):           # "new Dog(...)" is sugar for "Dog(...)"
             self.take()
             return self.parse_power()
         return self.parse_power()
+
+    def parse_lambda(self):
+        self.take()                       # 'make'
+        params = []
+        while not self.is_word("give"):
+            k, v = self.take()
+            if k == "NAME":
+                params.append(v)
+            elif k != "COMMA":
+                raise VantaError("a 'make' function reads: make PARAMS give VALUE")
+        self.take()                       # 'give'
+        return ("lambda", params, self.parse_expression())
 
     def parse_power(self):
         base = self.parse_postfix()
@@ -280,9 +294,15 @@ class Parser:
                 node = ("call", node, self.parse_list_until("RP"))
             elif kind == "LB":
                 self.take()
-                index = self.parse_expression()
-                self.expect("RB", "a closing ] is missing")
-                node = ("index", node, index)
+                start = None if self.peek()[0] == "COLON" else self.parse_expression()
+                if self.peek()[0] == "COLON":          # a slice: [a:b], [a:], [:b], [:]
+                    self.take()
+                    end = None if self.peek()[0] == "RB" else self.parse_expression()
+                    self.expect("RB", "a closing ] is missing")
+                    node = ("sliceop", node, start, end)
+                else:
+                    self.expect("RB", "a closing ] is missing")
+                    node = ("index", node, start)
             elif kind == "DOT":
                 self.take()
                 k, v = self.take()
@@ -602,6 +622,13 @@ def parse_one(lines, pos):
         check_name(names[0], lineno)
         return ("let", lineno, names[0], parse_expr_text(expr_text, lineno)), pos + 1
 
+    if head == "fix":
+        name, sep, expr_text = rest.partition(" be ")
+        if not sep:
+            raise VantaError(f"line {lineno}: use: fix NAME be VALUE")
+        check_name(name.strip(), lineno)
+        return ("fix", lineno, name.strip(), parse_expr_text(expr_text, lineno)), pos + 1
+
     if head == "change":
         if " to " not in rest:
             raise VantaError(f"line {lineno}: use: change NAME to VALUE")
@@ -782,6 +809,7 @@ class Function:
         self.params = params          # list of (name, default_node_or_None)
         self.body = body
         self.owner = None             # the type a method was defined in (for super)
+        self.defining_env = None      # the scope it was defined in (for closures)
 
 
 class Builtin:
@@ -824,6 +852,7 @@ _MISSING = object()
 class Environment:
     def __init__(self, parent=None):
         self.vars = {}
+        self.consts = set()      # names fixed with 'fix' and not reassignable
         self.parent = parent
 
     def get(self, name):
@@ -837,10 +866,16 @@ class Environment:
     def define(self, name, value):
         self.vars[name] = value
 
+    def fix(self, name, value):
+        self.vars[name] = value
+        self.consts.add(name)
+
     def assign(self, name, value):
         env = self
         while env is not None:
             if name in env.vars:
+                if name in env.consts:
+                    return "const"
                 env.vars[name] = value
                 return True
             env = env.parent
@@ -884,6 +919,9 @@ def _run_stmt(stmt, env):
 
     elif tag == "let":
         env.define(stmt[2], eval_expr(stmt[3], env))
+
+    elif tag == "fix":
+        env.fix(stmt[2], eval_expr(stmt[3], env))
 
     elif tag == "assign":
         do_assign(stmt[2], eval_expr(stmt[3], env), env)
@@ -979,7 +1017,9 @@ def _run_stmt(stmt, env):
 
     elif tag == "func":
         _, _, name, params, body = stmt
-        env.define(name, Function(name, params, body))
+        fn = Function(name, params, body)
+        fn.defining_env = env          # so a nested function closes over this scope
+        env.define(name, fn)
 
     elif tag == "type":
         _, _, name, parent_name, fields, own_methods = stmt
@@ -1099,6 +1139,12 @@ def eval_expr(node, env):
         return eval_expr(node[2], env) if truthy(eval_expr(node[1], env)) \
             else eval_expr(node[3], env)
 
+    if tag == "lambda":
+        params = [(name, None) for name in node[1]]
+        fn = Function("<anonymous>", params, [("return", 0, node[2])])
+        fn.defining_env = env          # closes over the scope it was made in
+        return fn
+
     if tag == "in":
         return is_member(eval_expr(node[1], env), eval_expr(node[2], env))
 
@@ -1130,6 +1176,17 @@ def eval_expr(node, env):
 
     if tag == "index":
         return get_index(eval_expr(node[1], env), eval_expr(node[2], env))
+
+    if tag == "sliceop":
+        target = eval_expr(node[1], env)
+        if not isinstance(target, (list, str)):
+            raise VantaError("you can only slice a list or text")
+        start = eval_expr(node[2], env) if node[2] is not None else None
+        end = eval_expr(node[3], env) if node[3] is not None else None
+        for bound in (start, end):
+            if bound is not None and (isinstance(bound, bool) or not isinstance(bound, int)):
+                raise VantaError("slice positions must be whole numbers")
+        return target[start:end]
 
     if tag == "getattr":
         return get_attr(eval_expr(node[1], env), node[2])
@@ -1184,7 +1241,7 @@ def bind_params(label, params, args, local):
 
 
 def call_function(fn, args):
-    local = Environment(GLOBAL_ENV)
+    local = Environment(fn.defining_env or GLOBAL_ENV)
     bind_params(f"'{fn.name}'", fn.params, args, local)
     try:
         run_block(fn.body, local)
@@ -1272,7 +1329,10 @@ def eval_value_group(value_nodes, count, env):
 def do_assign(target, value, env):
     tag = target[0]
     if tag == "name":
-        if not env.assign(target[1], value):
+        result = env.assign(target[1], value)
+        if result == "const":
+            raise VantaError(f"'{target[1]}' is fixed and can't be changed")
+        if not result:
             raise VantaError(f"'{target[1]}' doesn't exist yet "
                              f"(use: let {target[1]} be ...)")
     elif tag == "index":
@@ -1603,6 +1663,60 @@ def b_sqrt(args):
 def b_power(args):
     _need(args, 2, "power")
     return num_arg(args[0], "power") ** num_arg(args[1], "power")
+
+
+def b_sin(args):
+    _need(args, 1, "sin")
+    return math.sin(num_arg(args[0], "sin"))
+
+
+def b_cos(args):
+    _need(args, 1, "cos")
+    return math.cos(num_arg(args[0], "cos"))
+
+
+def b_tan(args):
+    _need(args, 1, "tan")
+    return math.tan(num_arg(args[0], "tan"))
+
+
+def b_log(args):
+    if len(args) == 1:
+        value = num_arg(args[0], "log")
+        if value <= 0:
+            raise VantaError("log needs a number above zero")
+        return math.log(value)
+    if len(args) == 2:
+        value, base = num_arg(args[0], "log"), num_arg(args[1], "log")
+        if value <= 0 or base <= 0:
+            raise VantaError("log needs numbers above zero")
+        return math.log(value, base)
+    raise VantaError("log expects a number (and an optional base)")
+
+
+def b_exp(args):
+    _need(args, 1, "exp")
+    return math.exp(num_arg(args[0], "exp"))
+
+
+def b_sum(args):
+    _need(args, 1, "sum")
+    if not isinstance(args[0], list):
+        raise VantaError("sum needs a list of numbers")
+    total = 0
+    for value in args[0]:
+        total = total + num_arg(value, "sum")
+    return total
+
+
+def b_product(args):
+    _need(args, 1, "product")
+    if not isinstance(args[0], list):
+        raise VantaError("product needs a list of numbers")
+    result = 1
+    for value in args[0]:
+        result = result * num_arg(value, "product")
+    return result
 
 
 def _less(a, b):
@@ -2068,6 +2182,8 @@ BUILTINS = {
     # numbers
     "abs": b_abs, "round": b_round, "floor": b_floor, "ceil": b_ceil,
     "sqrt": b_sqrt, "power": b_power, "min": b_min, "max": b_max,
+    "sin": b_sin, "cos": b_cos, "tan": b_tan, "log": b_log, "exp": b_exp,
+    "sum": b_sum, "product": b_product,
     "random": b_random, "now": b_now,
     # lists & maps
     "first": b_first, "last": b_last, "range": b_range, "contains": b_contains,
@@ -2188,7 +2304,8 @@ RESERVED = {"if", "end", "otherwise", "repeat", "while", "for", "each", "in",
             "to", "give", "back", "say", "let", "change", "ask", "stop",
             "skip", "import", "is", "be", "and", "or", "not", "yes", "no",
             "nothing", "times", "at", "type", "has", "attempt", "rescue", "new",
-            "from", "super", "match", "when", "increase", "decrease", "by"}
+            "from", "super", "match", "when", "increase", "decrease", "by",
+            "make", "fix"}
 
 
 def check_name(name, lineno):
