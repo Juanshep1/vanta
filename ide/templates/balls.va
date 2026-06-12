@@ -1,0 +1,51 @@
+# Bouncing balls - objects + animation.
+# Each ball is an object made from a type, moving every frame.
+
+canvas(480, 360)
+
+type Ball
+    has x
+    has y
+    has vx
+    has vy
+    has r
+    has c
+    to setup()
+        change me.r to random(8, 22)
+        change me.x to random(me.r, 480 - me.r)
+        change me.y to random(me.r, 360 - me.r)
+        change me.vx to random(2, 5)
+        change me.vy to random(2, 5)
+        change me.c to choice(["#b388ff", "#ff5470", "#5fd38a", "#ffd166", "#62b6ff"])
+    end
+    to move()
+        change me.x to me.x + me.vx
+        change me.y to me.y + me.vy
+        if me.x is under me.r or me.x is over 480 - me.r
+            change me.vx to -me.vx
+        end
+        if me.y is under me.r or me.y is over 360 - me.r
+            change me.vy to -me.vy
+        end
+    end
+    to draw()
+        color(me.c)
+        circle(me.x, me.y, me.r)
+    end
+end
+
+import "random"
+
+let balls be [new Ball() for each i in range(10)]
+
+to on_frame()
+    clear("#0d0d17")
+    for each b in balls
+        b.move()
+        b.draw()
+    end
+    color("#8a85a8")
+    text_at(8, 350, "{length(balls)} balls, all Vanta objects", 13)
+end
+
+say "Bouncing! Each ball is an instance of the Ball type."

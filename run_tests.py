@@ -57,7 +57,7 @@ def main():
             failed += 1
 
     print("\nheadless harnesses")
-    for harness in ["tools/chip8_headless.py"]:
+    for harness in ["tools/chip8_headless.py", "tools/ide_headless.py"]:
         result = subprocess.run([sys.executable, os.path.join(HERE, harness)],
                                 capture_output=True, text=True)
         name = os.path.basename(harness)

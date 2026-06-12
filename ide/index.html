@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vanta Studio</title>
+<link rel="icon" href="../assets/logo.png">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <img src="../assets/logo.png" alt="">
+    <span>Vanta <b>Studio</b></span>
+  </div>
+  <div class="actions">
+    <button id="run" class="primary" disabled title="Cmd/Ctrl+Enter">&#9654; Run</button>
+    <button id="stopBtn" disabled>&#9632; Stop</button>
+    <span class="divider"></span>
+    <button id="newFile">+ File</button>
+    <div class="dropdown">
+      <button id="templatesBtn">Templates &#9662;</button>
+      <div class="menu" id="templatesMenu"></div>
+    </div>
+    <span class="divider"></span>
+    <button id="cheatsheet">Cheatsheet</button>
+    <button id="exportBtn" title="Download project as JSON">Export</button>
+    <button id="importBtn">Import</button>
+    <input type="file" id="importFile" accept=".json" hidden>
+    <button id="settings" title="AI settings">&#9881;</button>
+  </div>
+  <div class="status" id="status">Booting Vanta&hellip;</div>
+</header>
+
+<main class="layout">
+
+  <aside class="sidebar">
+    <div class="panel-title">FILES</div>
+    <ul id="fileTree"></ul>
+    <div class="sidebar-foot">
+      <a href="../playground/" target="_blank">Playground</a>
+      <a href="https://github.com/Juanshep1/vanta" target="_blank">GitHub</a>
+    </div>
+  </aside>
+
+  <section class="workspace">
+    <div class="tabs" id="tabs"></div>
+    <div class="editor-wrap">
+      <div class="gutter" id="gutter"></div>
+      <div class="editor-stack">
+        <pre id="highlight" aria-hidden="true"></pre>
+        <textarea id="code" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+      </div>
+    </div>
+    <div class="bottom">
+      <div class="bottom-tabs">
+        <button data-pane="console" class="active">Console</button>
+        <button data-pane="canvasPane">Canvas</button>
+        <span id="lineCol" class="linecol">1:1</span>
+      </div>
+      <pre id="console" class="pane active"></pre>
+      <div id="canvasPane" class="pane">
+        <canvas id="screen" width="480" height="360" tabindex="0"></canvas>
+        <p class="canvas-hint">Click the canvas so games can hear your keyboard.</p>
+      </div>
+    </div>
+  </section>
+
+  <aside class="ai">
+    <div class="ai-head">
+      <div class="ai-avatar">V</div>
+      <div>
+        <div class="ai-name">Vee</div>
+        <div class="ai-sub" id="aiMode">offline helper &middot; add an API key for full AI</div>
+      </div>
+    </div>
+    <div class="ai-chips">
+      <button class="chip" data-prompt="Make me a fun little game I can play on the canvas.">&#127918; Make a game</button>
+      <button class="chip" data-prompt="__FIX__">&#128027; Fix my error</button>
+      <button class="chip" data-prompt="Explain what my current file does, simply.">&#128214; Explain my code</button>
+      <button class="chip" data-prompt="Improve my current file: cleaner, more idiomatic Vanta. Return the full updated file.">&#10024; Improve it</button>
+    </div>
+    <div class="ai-messages" id="aiMessages"></div>
+    <form class="ai-input" id="aiForm">
+      <textarea id="aiText" rows="2" placeholder="Ask Vee to build, fix, or explain anything&hellip;"></textarea>
+      <button type="submit" id="aiSend">Send</button>
+    </form>
+  </aside>
+
+</main>
+
+<!-- Settings modal -->
+<div class="modal-back" id="settingsModal" hidden>
+  <div class="modal">
+    <h2>Vee&rsquo;s AI settings</h2>
+    <p class="modal-note">Vee uses the Claude API directly from your browser. Your key is stored
+      only in this browser (localStorage) and sent only to Anthropic.</p>
+    <label>Anthropic API key
+      <input type="password" id="apiKey" placeholder="sk-ant-...">
+    </label>
+    <label>Model
+      <select id="aiModel">
+        <option value="claude-fable-5">Fable 5 (best)</option>
+        <option value="claude-opus-4-8">Opus 4.8</option>
+        <option value="claude-sonnet-4-6">Sonnet 4.6 (fast + capable)</option>
+        <option value="claude-haiku-4-5-20251001">Haiku 4.5 (fastest)</option>
+      </select>
+    </label>
+    <p class="modal-note">No key? Vee still works as an offline helper: templates, error
+      explanations, and a built-in language guide.</p>
+    <div class="modal-actions">
+      <button id="settingsSave" class="primary">Save</button>
+      <button id="settingsClose">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Cheatsheet modal -->
+<div class="modal-back" id="cheatModal" hidden>
+  <div class="modal wide">
+    <h2>Vanta in one page</h2>
+    <div class="cheat" id="cheatBody"></div>
+    <div class="modal-actions">
+      <button id="cheatClose" class="primary">Got it</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

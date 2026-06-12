@@ -1,0 +1,62 @@
+# Bank accounts - types, inheritance, super, and error handling.
+
+type Account
+    has owner
+    has balance
+    to setup(owner)
+        change me.owner to owner
+        change me.balance to 0
+    end
+    to deposit(amount)
+        if amount is at most 0
+            fail("deposits must be positive")
+        end
+        increase me.balance by amount
+    end
+    to withdraw(amount)
+        if amount is over me.balance
+            fail("{me.owner} only has {me.balance}")
+        end
+        decrease me.balance by amount
+    end
+    to show()
+        give back "{me.owner}: ${me.balance}"
+    end
+end
+
+type Savings from Account
+    has rate
+    to setup(owner, rate)
+        super.setup(owner)
+        change me.rate to rate
+    end
+    to add_interest()
+        let earned be floor(me.balance * me.rate / 100)
+        increase me.balance by earned
+        give back earned
+    end
+    to show()
+        give back super.show() + " (savings at {me.rate}%)"
+    end
+end
+
+let checking be new Account("Juan")
+checking.deposit(120)
+checking.withdraw(45)
+say checking
+
+let savings be new Savings("Juan", 5)
+savings.deposit(1000)
+let earned be savings.add_interest()
+say savings
+say "Interest earned: ${earned}"
+
+say ""
+say "Now watch error handling save us:"
+attempt
+    checking.withdraw(9999)
+rescue problem
+    say "Blocked: {problem}"
+end
+
+say "is savings an Account? {savings is an Account}"

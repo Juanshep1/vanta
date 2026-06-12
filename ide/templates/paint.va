@@ -1,0 +1,39 @@
+# Paint - draw with your mouse!
+# Click and drag on the canvas. Press C to clear, 1-4 to change brush size.
+
+canvas(480, 360)
+clear("#0d0d17")
+color("#8a85a8")
+text_at(110, 180, "click and drag to paint", 18)
+text_at(125, 205, "C clears - 1-4 brush size", 14)
+
+import "random"
+
+fix palette be ["#b388ff", "#ff5470", "#5fd38a", "#ffd166", "#62b6ff", "#ff9de2"]
+let brush be 6
+let stroke be 0
+
+to on_frame()
+    if key_down("c")
+        clear("#0d0d17")
+    end
+    if key_down("1")
+        change brush to 3
+    end
+    if key_down("2")
+        change brush to 6
+    end
+    if key_down("3")
+        change brush to 12
+    end
+    if key_down("4")
+        change brush to 20
+    end
+    if mouse_down()
+        increase stroke by 1
+        color(palette[floor(stroke / 30) % length(palette)])
+        circle(mouse_x(), mouse_y(), brush)
+    end
+end
+
+say "Paint is ready - click the canvas and drag!"

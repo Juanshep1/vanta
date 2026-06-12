@@ -1,0 +1,38 @@
+# Quiz show - a console game using ask, maps, and match.
+
+say "=== THE VANTA QUIZ ==="
+say "Type the number of your answer."
+say ""
+
+let questions be []
+add { "q": "What word prints something in Vanta?", "options": ["echo", "say", "print"], "answer": 2 } to questions
+add { "q": "What creates a brand-new variable?", "options": ["let", "change", "make"], "answer": 1 } to questions
+add { "q": "Which is a real Vanta comparison?", "options": ["x === y", "x is over y", "x.gt(y)"], "answer": 2 } to questions
+add { "q": "What ends every if, loop, and function?", "options": ["done", "close", "end"], "answer": 3 } to questions
+
+let score be 0
+
+for each i, item in questions
+    say "Q{i + 1}. {item[\"q\"]}"
+    for each n, option in item["options"]
+        say "   {n + 1}) {option}"
+    end
+    ask "Your answer:" into reply
+    if reply is item["answer"]
+        say "   Correct!"
+        increase score by 1
+    otherwise
+        say "   Not quite - the answer was {item[\"options\"][item[\"answer\"] - 1]}."
+    end
+    say ""
+end
+
+say "You scored {score} out of {length(questions)}."
+match score
+    when 4
+        say "Perfect! You are a Vanta master."
+    when 3
+        say "Great job - nearly perfect!"
+    otherwise
+        say "Keep practicing - ask Vee for help any time."
+end

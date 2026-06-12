@@ -1,0 +1,32 @@
+# Welcome to Vanta Studio!
+# Press Run (or Cmd/Ctrl+Enter) to run this file.
+
+say "Hello from Vanta!"
+
+# Variables read like English
+let name be "world"
+let year be 2026
+say "Hi {name}, welcome to {year}."
+
+# Decisions
+let hour be 14
+say "Good morning!" if hour is under 12 otherwise "Good afternoon!"
+
+# Loops and lists
+let squares be [n * n for each n in range(1, 6)]
+say "Squares: {to_json(squares)}"
+
+# Functions (with a default argument)
+to greet(who, greeting be "Hey")
+    give back "{greeting}, {who}!"
+end
+say greet("Vanta")
+say greet("Studio", "Welcome")
+
+# Maps
+let scores be { "alex": 91, "sam": 84 }
+for each player, score in scores
+    say "{player} scored {score}"
+end
+
+# Try asking Vee (the AI on the right) to build you something!

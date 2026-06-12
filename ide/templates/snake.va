@@ -1,0 +1,107 @@
+# SNAKE - a complete game written in Vanta.
+# Arrow keys (or WASD) to steer. Eat the food, don't hit yourself or the walls.
+# Press Run, then click the canvas so it hears your keys.
+
+canvas(480, 360)
+
+fix cell be 20
+fix cols be 24
+fix rows be 18
+
+let snake be [[12, 9], [11, 9], [10, 9]]
+let dx be 1
+let dy be 0
+let food be [18, 9]
+let score be 0
+let game_over be no
+let tick be 0
+
+to place_food()
+    let spot be [random(0, cols - 1), random(0, rows - 1)]
+    while contains(snake, spot)
+        change spot to [random(0, cols - 1), random(0, rows - 1)]
+    end
+    change food to spot
+end
+
+to reset_game()
+    change snake to [[12, 9], [11, 9], [10, 9]]
+    change dx to 1
+    change dy to 0
+    change score to 0
+    change game_over to no
+    place_food()
+end
+
+to steer()
+    if (key_down("left") or key_down("a")) and dx is not 1
+        change dx to -1
+        change dy to 0
+    otherwise if (key_down("right") or key_down("d")) and dx is not -1
+        change dx to 1
+        change dy to 0
+    otherwise if (key_down("up") or key_down("w")) and dy is not 1
+        change dx to 0
+        change dy to -1
+    otherwise if (key_down("down") or key_down("s")) and dy is not -1
+        change dx to 0
+        change dy to 1
+    end
+end
+
+to move()
+    let head be [snake[0][0] + dx, snake[0][1] + dy]
+    let hx be head[0]
+    let hy be head[1]
+    if hx is under 0 or hx is over cols - 1 or hy is under 0 or hy is over rows - 1
+        change game_over to yes
+        give back nothing
+    end
+    if contains(snake, head)
+        change game_over to yes
+        give back nothing
+    end
+    change snake to [head] + snake
+    if head is food
+        increase score by 1
+        place_food()
+    otherwise
+        change snake to snake[0:length(snake) - 1]
+    end
+end
+
+to draw()
+    clear("#0d0d17")
+    color("#ff5470")
+    circle(food[0] * cell + 10, food[1] * cell + 10, 8)
+    for each i, part in snake
+        color("#b388ff" if i is 0 otherwise "#7a5fd0")
+        rect(part[0] * cell + 1, part[1] * cell + 1, cell - 2, cell - 2)
+    end
+    color("#e7e3f5")
+    text_at(8, 22, "Score: {score}", 16)
+    if game_over
+        color("#ff5470")
+        text_at(130, 170, "GAME OVER", 32)
+        color("#e7e3f5")
+        text_at(140, 200, "press space to restart", 15)
+    end
+end
+
+to on_frame()
+    steer()
+    if game_over
+        if key_down("space")
+            reset_game()
+        end
+        draw()
+        give back nothing
+    end
+    increase tick by 1
+    if tick % 4 is 0
+        move()
+    end
+    draw()
+end
+
+say "Snake is running - click the canvas and use the arrow keys!"

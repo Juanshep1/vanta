@@ -2374,6 +2374,16 @@ GLOBAL_ENV.define("pi", math.pi)
 GLOBAL_ENV.define("e", math.e)
 
 
+def reset_runtime():
+    """Clear all program state so a host (REPL, IDE, playground) can run a
+    fresh program without restarting the interpreter."""
+    GLOBAL_ENV.vars.clear()
+    GLOBAL_ENV.consts.clear()
+    GLOBAL_ENV.define("pi", math.pi)
+    GLOBAL_ENV.define("e", math.e)
+    IMPORTED.clear()
+
+
 def call_vanta(name, args):
     """Call a Vanta function (or builtin) by name from host code (used by the
     browser playground to drive the emulator). Returns the function's value."""

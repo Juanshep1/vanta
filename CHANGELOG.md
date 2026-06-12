@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.7 — Vanta Studio
+- **Vanta Studio** (`ide/`) — a full browser IDE: multi-file projects with
+  tabs and a file tree, Vanta syntax highlighting, console + canvas panes,
+  templates, export/import, and a one-page cheatsheet
+- **A canvas game API** provided by the Studio host: `canvas` `clear` `color`
+  `rect` `circle` `line` `text_at` `key_down` `mouse_x` `mouse_y` `mouse_down`
+  `stop_game`, plus an `on_frame()` game loop at 30 fps — Snake, Paint, and
+  bouncing-ball demos ship as templates, all written in Vanta
+- **Vee, an AI assistant** built into the Studio — powered by the Claude API
+  (bring your own key; it knows the whole Vanta language and applies generated
+  files straight into your project), with a useful offline mode
+- `reset_runtime()` host API in the interpreter so IDEs/REPLs can re-run
+  programs cleanly
+- Template smoke tests (`tools/ide_headless.py`) wired into the test suite
+
 ## 3.6
 - Anonymous functions: `make x give x * 2`
 - Proper lexical closures — a function (named or anonymous) captures the scope

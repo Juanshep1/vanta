@@ -70,13 +70,30 @@ cd vanta
 don't want to use the launcher. Put the `vanta` directory on your `PATH` and you
 can just type `vanta` anywhere (`vanta.bat` is there for Windows).
 
-## Try it in your browser
+## Vanta Studio — the IDE
 
-There's a [playground](playground/) that runs the *actual* `vanta.py` in the
-browser (via Pyodide — CPython compiled to WebAssembly). It has two modes: write
-and run Vanta code, or load a `.ch8` ROM into a **CHIP-8 emulator that is itself
-written in Vanta** (`emulator/chip8.va`). It plays real ROMs — the IBM logo,
-Breakout, and your own. To run it locally:
+[**Vanta Studio**](ide/) is a full IDE for Vanta that runs in your browser:
+multi-file projects, syntax highlighting, a console, and a **canvas with a game
+API** (`rect`, `circle`, `key_down`, an `on_frame()` loop at 30 fps) so you can
+write and play games in Vanta — a complete Snake ships as a template, written
+entirely in Vanta. It also has **Vee**, a built-in AI assistant: add your own
+Claude API key in settings and Vee writes whole Vanta projects straight into
+your editor (it works as an offline helper without one).
+
+Live: **https://juanshep1.github.io/vanta/ide/** — or locally:
+
+```bash
+python3 -m http.server 8000     # from the repo root
+# open http://localhost:8000/ide/
+```
+
+## The playground
+
+There's also a simpler [playground](playground/) that runs the *actual*
+`vanta.py` in the browser (via Pyodide — CPython compiled to WebAssembly). It
+has two modes: write and run Vanta code, or load a `.ch8` ROM into a **CHIP-8
+emulator that is itself written in Vanta** (`emulator/chip8.va`). It plays real
+ROMs — the IBM logo, Breakout, and your own. To run it locally:
 
 ```bash
 python3 -m http.server 8000     # from the repo root
