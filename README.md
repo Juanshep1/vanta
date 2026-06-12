@@ -390,11 +390,25 @@ Every programming language does three things, and all three live in `vanta.py`:
 2. **Parse** — turn the tokens into a tree. Expressions use a recursive-descent
    parser with the usual precedence (multiplication before addition, comparisons
    last); statements are line-based and blocks close with `end`.
-3. **Run** — walk the tree. Variables live in scoped environments, which is what
-   makes functions and recursion work.
+3. **Compile** — walk the tree *once* and turn each node into a small Python
+   function (a closure) that does exactly its job. Operators, variable lookups,
+   and calls are resolved here, not re-decided on every run.
+4. **Run** — call the compiled closures. Variables live in scoped environments,
+   which is what makes functions, recursion, and closures work; control flow
+   (`give back`, `stop`, `skip`) travels as return signals rather than
+   exceptions.
 
-There's no compiler and no bytecode. It's the most direct kind of interpreter
-there is, which is the point — you can actually follow it.
+The original interpreter just walked the tree directly on every run — simpler to
+read, but it re-decided what each line meant every single time. The compile step
+keeps the same readable tree but does that work once, which is roughly 3× faster.
+Both engines live in `vanta.py`; the tree-walker is still there as the fallback
+for a few rare statements. It's still an interpreter you can actually follow —
+just no longer a naive one. (`tools/benchmark.py` measures it.)
+
+Honest limit: it's still interpreted in Python, so it's slower than C/Rust/V8 on
+heavy number-crunching. That matters for tight compute loops, not for servers,
+scripts, or talking to APIs — those wait on I/O, where the interpreter speed
+barely shows.
 
 ## Examples
 

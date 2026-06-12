@@ -1,5 +1,31 @@
 # Changelog
 
+## 4.2 — a real compiler (3.2× faster again)
+Vanta no longer re-reads the syntax tree every time it runs a line. It now
+**compiles each program once into nested Python closures** — every operator,
+variable, and call is resolved at compile time, so the per-line "what does this
+mean?" cost (the biggest tax of the old tree-walker) is gone.
+
+- On the benchmark (`fib(27)` + a 300k loop), wall-clock went from **7.1s →
+  2.2s** — about **3.2× faster than where this started**, ~1.6× faster than 4.1.
+- How: a `compile_expr`/`compile_stmt`/`compile_block` pass builds the closures;
+  `Function` caches its compiled body. The common operations are specialised at
+  compile time — number `+ - *`, comparisons, and variable lookups are inlined
+  rather than dispatched.
+- **Control flow no longer raises exceptions on the hot path.** `give back`,
+  `stop`, and `skip` used to raise a Python exception every time (every single
+  function call raised one); they now travel as lightweight return signals that
+  blocks and loops pass upward. Verified against nested-loop returns,
+  break/continue, and `return` inside `attempt`.
+- Behaviour is unchanged — the same 34-check suite passes. The old tree-walker
+  stays as the engine for a few rare statements, so nothing lost coverage.
+
+Still honest: this is the practical ceiling for interpreting Vanta in Python —
+~3× is what compiling-to-closures buys. A further large jump (toward 10×) would
+mean translating Vanta to Python/machine code or a C core, which is a separate,
+much bigger project, not more tuning. For I/O work (servers, scripts, APIs) none
+of this was ever the bottleneck anyway.
+
 ## 4.1 — faster, and servers that handle real traffic
 - **~1.7× faster interpreter.** A focused pass on the hottest code paths (no
   behaviour change — all 34 tests still pass). On the benchmark (`fib(27)` plus

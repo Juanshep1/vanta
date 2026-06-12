@@ -28,7 +28,7 @@ import math
 import subprocess
 import random
 
-VERSION = "4.1"
+VERSION = "4.2"
 
 # Command-line arguments passed to a Vanta program (after the script name).
 PROGRAM_ARGS = []
@@ -808,6 +808,7 @@ class Function:
         self.name = name
         self.params = params          # list of (name, default_node_or_None)
         self.body = body
+        self.compiled = None          # compiled body (a block runner); built on demand
         self.owner = None             # the type a method was defined in (for super)
         self.defining_env = None      # the scope it was defined in (for closures)
 
@@ -1266,26 +1267,30 @@ def bind_params(name, params, args, local):
 
 
 def call_function(fn, args):
+    body = fn.compiled
+    if body is None:
+        body = fn.compiled = compile_block(fn.body)
     local = Environment(fn.defining_env or GLOBAL_ENV)
     bind_params(fn.name, fn.params, args, local)
-    try:
-        run_block(fn.body, local)
-    except ReturnSignal as r:
-        return r.value
+    sig = body(local)
+    if type(sig) is _Return:
+        return sig.value
     return None
 
 
 def call_method(inst, fn, args):
+    body = fn.compiled
+    if body is None:
+        body = fn.compiled = compile_block(fn.body)
     local = Environment(GLOBAL_ENV)
     lv = local.vars
     lv["me"] = inst
     parent_type = fn.owner.parent if getattr(fn, "owner", None) else None
     lv["super"] = SuperProxy(inst, parent_type)
     bind_params(fn.name, fn.params, args, local)
-    try:
-        run_block(fn.body, local)
-    except ReturnSignal as r:
-        return r.value
+    sig = body(local)
+    if type(sig) is _Return:
+        return sig.value
     return None
 
 
@@ -2599,7 +2604,535 @@ def import_file(name):
             source = f.read()
     except OSError as e:
         raise VantaError(f"could not import {name}: {e}")
-    run_block(parse_program(load_lines(source)), GLOBAL_ENV)
+    compile_block(parse_program(load_lines(source)))(GLOBAL_ENV)
+
+
+# ===========================================================================
+# COMPILER  (turn the AST into nested Python closures, once, so we never
+# re-walk the tree at run time)
+#
+# The tree-walker above re-decides what every node means on every visit — that
+# dispatch is the dominant cost. Here we compile each node ONCE into a small
+# Python function `f(env)` that does exactly its job: the operator, the variable,
+# the call are all resolved at compile time. The closures reuse every semantic
+# helper above (arithmetic, compare, get_index, apply_callable, ...), so the
+# behaviour is identical to the tree-walker — only the dispatch disappears.
+# A Function caches its compiled body (see call_function); the tree-walker stays
+# as the engine for the few rare statements we don't specialise (e.g. 'type').
+# ===========================================================================
+
+# Control flow inside compiled code travels as a returned *signal* instead of a
+# raised exception (raising on every function return / loop break is slow). A
+# compiled statement returns None to mean "carry on", a _Return to unwind a
+# function, or the _BREAK / _CONTINUE singletons inside a loop. Blocks and loops
+# below check for these and propagate them. (The tree-walker still uses the
+# ReturnSignal/BreakLoop/ContinueLoop exceptions, but it's now the cold path.)
+class _Return:
+    __slots__ = ("value",)
+
+    def __init__(self, value):
+        self.value = value
+
+
+_BREAK = object()
+_CONTINUE = object()
+
+
+def lookup_name(env, name):
+    e = env
+    while e is not None:
+        v = e.vars
+        if name in v:
+            return v[name]
+        e = e.parent
+    b = BUILTIN_VALUES.get(name, _MISSING)
+    if b is not _MISSING:
+        return b
+    raise VantaError(f"I don't know what '{name}' is yet")
+
+
+def compile_expr(node):
+    tag = node[0]
+
+    if tag == "lit":
+        value = node[1]
+        return lambda env: value
+
+    if tag == "name":
+        name = node[1]
+        # the env-chain walk is inlined here (no helper call) — name lookup is
+        # the single most frequent operation in almost any program
+        def ev(env):
+            e = env
+            while e is not None:
+                v = e.vars
+                if name in v:
+                    return v[name]
+                e = e.parent
+            b = BUILTIN_VALUES.get(name, _MISSING)
+            if b is not _MISSING:
+                return b
+            raise VantaError(f"I don't know what '{name}' is yet")
+        return ev
+
+    if tag == "arith":
+        op = node[1]
+        a = compile_expr(node[2])
+        b = compile_expr(node[3])
+        if op == "+":
+            def ev(env):
+                x = a(env); y = b(env)
+                if type(x) is int and type(y) is int:
+                    return x + y
+                return arithmetic("+", x, y)
+            return ev
+        if op == "-":
+            def ev(env):
+                x = a(env); y = b(env)
+                if type(x) is int and type(y) is int:
+                    return x - y
+                return arithmetic("-", x, y)
+            return ev
+        if op == "*":
+            def ev(env):
+                x = a(env); y = b(env)
+                if type(x) is int and type(y) is int:
+                    return x * y
+                return arithmetic("*", x, y)
+            return ev
+        return lambda env: arithmetic(op, a(env), b(env))
+
+    if tag == "cmp":
+        op = node[1]
+        a = compile_expr(node[2])
+        b = compile_expr(node[3])
+        if op == "==":
+            return lambda env: a(env) == b(env)
+        if op == "!=":
+            return lambda env: a(env) != b(env)
+        if op == "<":
+            def ev(env):
+                x = a(env); y = b(env)
+                tx = type(x); ty = type(y)
+                if (tx is int or tx is float) and (ty is int or ty is float):
+                    return x < y
+                return compare("<", x, y)
+            return ev
+        if op == ">":
+            def ev(env):
+                x = a(env); y = b(env)
+                tx = type(x); ty = type(y)
+                if (tx is int or tx is float) and (ty is int or ty is float):
+                    return x > y
+                return compare(">", x, y)
+            return ev
+        if op == "<=":
+            def ev(env):
+                x = a(env); y = b(env)
+                tx = type(x); ty = type(y)
+                if (tx is int or tx is float) and (ty is int or ty is float):
+                    return x <= y
+                return compare("<=", x, y)
+            return ev
+        if op == ">=":
+            def ev(env):
+                x = a(env); y = b(env)
+                tx = type(x); ty = type(y)
+                if (tx is int or tx is float) and (ty is int or ty is float):
+                    return x >= y
+                return compare(">=", x, y)
+            return ev
+        return lambda env: compare(op, a(env), b(env))
+
+    if tag == "call":
+        callee_node = node[1]
+        cargs = [compile_expr(a) for a in node[2]]
+        if callee_node[0] == "name":
+            name = callee_node[1]
+            def ev(env):
+                e = env
+                while e is not None:
+                    v = e.vars
+                    if name in v:
+                        return apply_callable(v[name], [a(env) for a in cargs])
+                    e = e.parent
+                callee = BUILTIN_VALUES.get(name, _MISSING)
+                if callee is _MISSING:
+                    raise VantaError(f"I don't know a function called '{name}'")
+                return apply_callable(callee, [a(env) for a in cargs])
+            return ev
+        cf = compile_expr(callee_node)
+        return lambda env: apply_callable(cf(env), [a(env) for a in cargs])
+
+    if tag == "index":
+        a = compile_expr(node[1])
+        b = compile_expr(node[2])
+        return lambda env: get_index(a(env), b(env))
+
+    if tag == "getattr":
+        a = compile_expr(node[1])
+        attr = node[2]
+        return lambda env: get_attr(a(env), attr)
+
+    if tag == "format":
+        parts = [compile_expr(p) for p in node[1]]
+        return lambda env: "".join(display(p(env)) for p in parts)
+
+    if tag == "list":
+        items = [compile_expr(i) for i in node[1]]
+        return lambda env: [i(env) for i in items]
+
+    if tag == "map":
+        pairs = [(compile_expr(k), compile_expr(v)) for k, v in node[1]]
+        def ev(env):
+            result = {}
+            for k, v in pairs:
+                result[k(env)] = v(env)
+            return result
+        return ev
+
+    if tag == "and":
+        a = compile_expr(node[1]); b = compile_expr(node[2])
+        def ev(env):
+            if not truthy(a(env)):
+                return False
+            return truthy(b(env))
+        return ev
+
+    if tag == "or":
+        a = compile_expr(node[1]); b = compile_expr(node[2])
+        def ev(env):
+            if truthy(a(env)):
+                return True
+            return truthy(b(env))
+        return ev
+
+    if tag == "not":
+        a = compile_expr(node[1])
+        return lambda env: not truthy(a(env))
+
+    if tag == "neg":
+        a = compile_expr(node[1])
+        def ev(env):
+            value = a(env)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise VantaError("only numbers can be negative")
+            return -value
+        return ev
+
+    if tag == "ternary":
+        c = compile_expr(node[1]); t = compile_expr(node[2]); f = compile_expr(node[3])
+        return lambda env: t(env) if truthy(c(env)) else f(env)
+
+    if tag == "in":
+        a = compile_expr(node[1]); b = compile_expr(node[2])
+        return lambda env: is_member(a(env), b(env))
+
+    if tag == "notin":
+        a = compile_expr(node[1]); b = compile_expr(node[2])
+        return lambda env: not is_member(a(env), b(env))
+
+    if tag == "isa":
+        val = compile_expr(node[1]); target = compile_expr(node[2])
+        def ev(env):
+            t = target(env)
+            if not isinstance(t, VantaType):
+                raise VantaError("the right side of 'is a' must be a type")
+            return is_instance_of(val(env), t)
+        return ev
+
+    if tag == "lambda":
+        params = [(name, None) for name in node[1]]
+        body_ast = [("return", 0, node[2])]
+        compiled_body = compile_block(body_ast)
+        def ev(env):
+            fn = Function("<anonymous>", params, body_ast)
+            fn.compiled = compiled_body
+            fn.defining_env = env
+            return fn
+        return ev
+
+    if tag == "listcomp":
+        _, out_expr, var, iter_expr, cond = node
+        out = compile_expr(out_expr)
+        itr = compile_expr(iter_expr)
+        cnd = compile_expr(cond) if cond is not None else None
+        def ev(env):
+            loop_env = Environment(env)
+            lv = loop_env.vars
+            result = []
+            for item in iterate(itr(env)):
+                lv[var] = item
+                if cnd is None or truthy(cnd(loop_env)):
+                    result.append(out(loop_env))
+            return result
+        return ev
+
+    if tag == "mapcomp":
+        _, key_expr, val_expr, var, iter_expr, cond = node
+        kc = compile_expr(key_expr)
+        vc = compile_expr(val_expr)
+        itr = compile_expr(iter_expr)
+        cnd = compile_expr(cond) if cond is not None else None
+        def ev(env):
+            loop_env = Environment(env)
+            lv = loop_env.vars
+            result = {}
+            for item in iterate(itr(env)):
+                lv[var] = item
+                if cnd is None or truthy(cnd(loop_env)):
+                    result[kc(loop_env)] = vc(loop_env)
+            return result
+        return ev
+
+    if tag == "sliceop":
+        target = compile_expr(node[1])
+        s = compile_expr(node[2]) if node[2] is not None else None
+        e = compile_expr(node[3]) if node[3] is not None else None
+        def ev(env):
+            t = target(env)
+            if not isinstance(t, (list, str)):
+                raise VantaError("you can only slice a list or text")
+            start = s(env) if s is not None else None
+            end = e(env) if e is not None else None
+            for bound in (start, end):
+                if bound is not None and (isinstance(bound, bool) or not isinstance(bound, int)):
+                    raise VantaError("slice positions must be whole numbers")
+            return t[start:end]
+        return ev
+
+    # anything we didn't specialise: fall back to the tree-walker (correct, rare)
+    return lambda env: eval_expr(node, env)
+
+
+def compile_stmt(stmt):
+    tag = stmt[0]
+
+    if tag == "expr":
+        n = compile_expr(stmt[2])
+        def ex(env):
+            n(env)
+        return ex
+
+    if tag == "let":
+        name = stmt[2]; v = compile_expr(stmt[3])
+        def ex(env):
+            env.vars[name] = v(env)
+        return ex
+
+    if tag == "assign":
+        target = stmt[2]; v = compile_expr(stmt[3])
+        ttag = target[0]
+        if ttag == "name":
+            name = target[1]
+            def ex(env):
+                result = env.assign(name, v(env))
+                if result == "const":
+                    raise VantaError(f"'{name}' is fixed and can't be changed")
+                if not result:
+                    raise VantaError(f"'{name}' doesn't exist yet "
+                                     f"(use: let {name} be ...)")
+            return ex
+        if ttag == "index":
+            coll = compile_expr(target[1]); idx = compile_expr(target[2])
+            def ex(env):
+                set_index(coll(env), idx(env), v(env))
+            return ex
+        if ttag == "getattr":
+            obj = compile_expr(target[1]); attr = target[2]
+            def ex(env):
+                set_attr(obj(env), attr, v(env))
+            return ex
+        return lambda env: do_assign(target, v(env), env)
+
+    if tag == "if":
+        branches = [(compile_expr(c), compile_block(body)) for c, body in stmt[2]]
+        else_body = compile_block(stmt[3])
+        def ex(env):
+            for cond, body in branches:
+                if truthy(cond(env)):
+                    return body(env)
+            return else_body(env)
+        return ex
+
+    if tag == "return":
+        v = compile_expr(stmt[2])
+        def ex(env):
+            return _Return(v(env))
+        return ex
+
+    if tag == "say":
+        node = stmt[2]
+        if node is None:
+            return lambda env: print("")
+        n = compile_expr(node)
+        return lambda env: print(display(n(env)))
+
+    if tag == "mutate":
+        _, _, target_node, sign, amount_node = stmt
+        tget = compile_expr(target_node)
+        amt = compile_expr(amount_node)
+        def ex(env):
+            new_value = arithmetic(sign, tget(env), amt(env))
+            do_assign(target_node, new_value, env)
+        return ex
+
+    if tag == "while":
+        cond = compile_expr(stmt[2]); body = compile_block(stmt[3])
+        def ex(env):
+            while truthy(cond(env)):
+                sig = body(env)
+                if sig is not None:
+                    if sig is _CONTINUE:
+                        continue
+                    if sig is _BREAK:
+                        break
+                    return sig            # a _Return — unwind the function
+            return None
+        return ex
+
+    if tag == "foreach":
+        _, _, name, iter_node, body_ast = stmt
+        itr = compile_expr(iter_node); body = compile_block(body_ast)
+        def ex(env):
+            lv = env.vars
+            for item in iterate(itr(env)):
+                lv[name] = item
+                sig = body(env)
+                if sig is not None:
+                    if sig is _CONTINUE:
+                        continue
+                    if sig is _BREAK:
+                        break
+                    return sig
+            return None
+        return ex
+
+    if tag == "foreach2":
+        _, _, name1, name2, iter_node, body_ast = stmt
+        itr = compile_expr(iter_node); body = compile_block(body_ast)
+        def ex(env):
+            lv = env.vars
+            for first, second in iterate_pairs(itr(env)):
+                lv[name1] = first
+                lv[name2] = second
+                sig = body(env)
+                if sig is not None:
+                    if sig is _CONTINUE:
+                        continue
+                    if sig is _BREAK:
+                        break
+                    return sig
+            return None
+        return ex
+
+    if tag == "repeat":
+        cnt = compile_expr(stmt[2]); body = compile_block(stmt[3])
+        def ex(env):
+            count = cnt(env)
+            if not isinstance(count, int) or isinstance(count, bool):
+                raise VantaError("repeat needs a whole number of times")
+            for _ in range(count):
+                sig = body(env)
+                if sig is not None:
+                    if sig is _CONTINUE:
+                        continue
+                    if sig is _BREAK:
+                        break
+                    return sig
+            return None
+        return ex
+
+    if tag == "func":
+        _, _, name, params, body_ast = stmt
+        compiled_body = compile_block(body_ast)
+        def ex(env):
+            fn = Function(name, params, body_ast)
+            fn.compiled = compiled_body
+            fn.defining_env = env
+            env.vars[name] = fn
+        return ex
+
+    if tag == "fix":
+        name = stmt[2]; v = compile_expr(stmt[3])
+        def ex(env):
+            env.fix(name, v(env))
+        return ex
+
+    if tag == "append":
+        v = compile_expr(stmt[2]); t = compile_expr(stmt[3])
+        def ex(env):
+            value = v(env); target = t(env)
+            if not isinstance(target, list):
+                raise VantaError("you can only 'add ... to' a list")
+            target.append(value)
+        return ex
+
+    if tag == "match":
+        subj = compile_expr(stmt[2])
+        branches = [(compile_expr(vn), compile_block(b)) for vn, b in stmt[3]]
+        else_body = compile_block(stmt[4])
+        def ex(env):
+            s = subj(env)
+            for value_node, body in branches:
+                if s == value_node(env):
+                    return body(env)
+            return else_body(env)
+        return ex
+
+    if tag == "attempt":
+        _, _, body_ast, errname, rescue_ast = stmt
+        body = compile_block(body_ast); rescue = compile_block(rescue_ast)
+        def ex(env):
+            try:
+                return body(env)
+            except VantaError as e:
+                env.vars[errname] = clean_message(str(e))
+                return rescue(env)
+        return ex
+
+    if tag == "stop":
+        return lambda env: _BREAK
+
+    if tag == "skip":
+        return lambda env: _CONTINUE
+
+    if tag == "import":
+        imp = compile_expr(stmt[2])
+        return lambda env: import_file(display(imp(env)))
+
+    # rare statements (type definitions, multi-assign, ask): reuse the proven
+    # tree-walker — these run once or seldom and aren't on any hot path.
+    return lambda env: _run_stmt(stmt, env)
+
+
+def compile_block(stmts):
+    compiled = [(compile_stmt(s), s[1]) for s in stmts]
+
+    if len(compiled) == 1:
+        # the common case (an if-branch, a one-line loop body) — skip the loop
+        only, ln = compiled[0]
+        def run_one(env):
+            try:
+                return only(env)
+            except VantaError as e:
+                if str(e).startswith("line "):
+                    raise
+                raise VantaError(f"line {ln}: {e}")
+        return run_one
+
+    def run(env):
+        for ex, lineno in compiled:
+            try:
+                sig = ex(env)
+            except VantaError as e:
+                if str(e).startswith("line "):
+                    raise
+                raise VantaError(f"line {lineno}: {e}")
+            if sig is not None:
+                return sig          # _Return / _BREAK / _CONTINUE — propagate up
+        return None
+    return run
 
 
 # ===========================================================================
@@ -2634,7 +3167,7 @@ def call_vanta(name, args):
 
 
 def run_source(source):
-    run_block(parse_program(load_lines(source)), GLOBAL_ENV)
+    compile_block(parse_program(load_lines(source)))(GLOBAL_ENV)
 
 
 def repl():
