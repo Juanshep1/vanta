@@ -103,10 +103,15 @@
       <select id="aiProvider">
         <option value="anthropic">Anthropic (Claude)</option>
         <option value="openrouter">OpenRouter (any model)</option>
+        <option value="ollama-cloud">Ollama Cloud</option>
+        <option value="nvidia">NVIDIA NIM</option>
       </select>
     </label>
     <label>API key
       <input type="password" id="apiKey" placeholder="sk-ant-...">
+    </label>
+    <label id="baseUrlRow" hidden>Base URL
+      <input id="baseUrl" placeholder="https://ollama.com/v1">
     </label>
     <label>Model
       <input id="aiModel" list="modelList" placeholder="claude-fable-5">

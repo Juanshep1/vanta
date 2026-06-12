@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.7.1
+- Vanta Studio: Vee gained two more providers — **Ollama Cloud** and
+  **NVIDIA NIM** (OpenAI-compatible), with a live **Ollama Cloud model picker**
+  (bundled list + live refresh) and an editable **Base URL** (for local Ollama
+  or a CORS proxy). Note: those two providers send no CORS headers, so direct
+  browser calls are blocked unless you point Base URL at a local endpoint/proxy.
+
 ## 3.7 — Vanta Studio
 - **Vanta Studio** (`ide/`) — a full browser IDE: multi-file projects with
   tabs and a file tree, Vanta syntax highlighting, console + canvas panes,

@@ -34,7 +34,31 @@ const PROVIDERS = {
              "google/gemini-2.5-flash", "deepseek/deepseek-chat",
              "meta-llama/llama-4-maverick"],
   },
+  "ollama-cloud": {
+    label: "Ollama Cloud",
+    keyLS: "vanta-studio-apikey-ollama", modelLS: "vanta-studio-model-ollama",
+    defaultModel: "qwen3-coder:480b",
+    placeholder: "Ollama key (ollama.com/settings)",
+    apiStyle: "openai",
+    baseUrl: "https://ollama.com/v1",
+    note: "Key at ollama.com/settings. ⚠ Ollama Cloud sends no CORS headers, so the browser can't call it directly — set Base URL to a local Ollama (http://localhost:11434/v1) or a CORS proxy, or use Ollama via FERRIS.",
+    models: ["qwen3-coder:480b", "glm-5", "kimi-k2.6", "gpt-oss:120b",
+             "deepseek-v3.1:671b", "gemma3:27b", "qwen3-vl:235b"],
+  },
+  nvidia: {
+    label: "NVIDIA NIM",
+    keyLS: "vanta-studio-apikey-nvidia", modelLS: "vanta-studio-model-nvidia",
+    defaultModel: "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+    placeholder: "nvapi-... (build.nvidia.com)",
+    apiStyle: "openai",
+    baseUrl: "https://integrate.api.nvidia.com/v1",
+    note: "Key at build.nvidia.com (free tier). ⚠ NVIDIA NIM sends no CORS headers — use a CORS proxy in Base URL, or use NVIDIA via FERRIS (server-side).",
+    models: ["nvidia/llama-3.3-nemotron-super-49b-v1.5", "meta/llama-3.3-70b-instruct",
+             "deepseek-ai/deepseek-r1", "qwen/qwen2.5-coder-32b-instruct"],
+  },
 };
+
+const LS_BASE = "vanta-studio-base-";   // + provider id
 
 const getProvider = () => localStorage.getItem(LS_PROVIDER) || "anthropic";
 const getAiKey = () => localStorage.getItem(PROVIDERS[getProvider()].keyLS) || "";
@@ -42,6 +66,8 @@ const getAiModel = () => {
   const p = PROVIDERS[getProvider()];
   return localStorage.getItem(p.modelLS) || p.defaultModel;
 };
+const getBaseUrl = (provider) =>
+  (localStorage.getItem(LS_BASE + provider) || PROVIDERS[provider].baseUrl || "").replace(/\/+$/, "");
 
 /* ------- OpenRouter live model catalog (every model, free ones marked) ------- */
 
@@ -86,6 +112,41 @@ function renderOrModelList() {
   $("providerNote").textContent = orCatalog
     ? `${orCatalog.length} models loaded live from openrouter.ai (${freeCount} free, listed first). Type in the model box to search.`
     : PROVIDERS.openrouter.note;
+}
+
+/* ------- Ollama Cloud model picker (live list, falls back to bundled) ------- */
+
+async function loadOllamaModels() {
+  // Bundled list always works; try a live refresh on top (works from a local
+  // Ollama / CORS proxy base, but ollama.com itself is CORS-blocked in browser).
+  const bundled = PROVIDERS["ollama-cloud"].models.slice();
+  try {
+    const base = getBaseUrl("ollama-cloud");
+    const key = localStorage.getItem(PROVIDERS["ollama-cloud"].keyLS) || "";
+    const resp = await fetch(base + "/models", {
+      headers: key ? { authorization: "Bearer " + key } : {},
+    });
+    const data = await resp.json();
+    const live = (data.data || data.models || []).map((m) => m.id || m.name).filter(Boolean);
+    if (live.length) {
+      const merged = Array.from(new Set([...live, ...bundled]));
+      renderModelList(merged);
+      $("providerNote").textContent = `${live.length} models loaded live from Ollama (${base}). Type to search.`;
+      return;
+    }
+  } catch (e) { /* CORS-blocked on ollama.com — fall back below */ }
+  renderModelList(bundled);
+  $("providerNote").textContent = PROVIDERS["ollama-cloud"].note;
+}
+
+function renderModelList(ids) {
+  const list = $("modelList");
+  list.innerHTML = "";
+  for (const id of ids) {
+    const o = document.createElement("option");
+    o.value = id;
+    list.appendChild(o);
+  }
 }
 
 let files = {};            // name -> content
@@ -708,18 +769,42 @@ async function askVee(prompt) {
   aiBusy = true;
   const thinking = addMsg("vee thinking", "Vee is thinking");
   try {
-    const text = getProvider() === "openrouter"
-      ? await callOpenRouter(key)
-      : await callAnthropic(key);
+    const provider = getProvider();
+    let text;
+    if (provider === "anthropic") text = await callAnthropic(key);
+    else if (provider === "openrouter") text = await callOpenRouter(key);
+    else text = await callOpenAICompatible(provider, key);   // ollama-cloud, nvidia
     thinking.remove();
     aiHistory.push({ role: "assistant", content: text });
     const div = addMsg("vee", mdToHtml(text));
     bindApplyButtons(div);
   } catch (err) {
     thinking.remove();
-    addMsg("vee", `<b>Error:</b> ${esc(String(err.message || err))}`);
+    const p = PROVIDERS[getProvider()];
+    const corsHint = (p && p.apiStyle === "openai" && /failed to fetch|networkerror|load failed/i.test(String(err.message || err)))
+      ? `<br><br><i>This looks like a browser CORS block — ${esc(p.label)} doesn't allow direct browser calls. Set a local/proxy <b>Base URL</b> in ⚙ settings, or use this provider in FERRIS instead.</i>`
+      : "";
+    addMsg("vee", `<b>Error:</b> ${esc(String(err.message || err))}${corsHint}`);
   }
   aiBusy = false;
+}
+
+async function callOpenAICompatible(provider, key) {
+  const base = getBaseUrl(provider);
+  const resp = await fetch(base + "/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer " + key },
+    body: JSON.stringify({
+      model: getAiModel(),
+      max_tokens: 8192,
+      messages: [{ role: "system", content: systemPrompt() }, ...aiHistory.slice(-12)],
+    }),
+  });
+  const data = await resp.json();
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+  const msg = data.choices && data.choices[0] && data.choices[0].message;
+  if (!msg) throw new Error("empty response from " + provider);
+  return msg.content || "";
 }
 
 async function callAnthropic(key) {
@@ -1007,18 +1092,21 @@ function init() {
     $("aiModel").value = localStorage.getItem(p.modelLS) || p.defaultModel;
     $("providerNote").textContent = p.note;
     $("freeRow").hidden = provider !== "openrouter";
-    const list = $("modelList");
-    list.innerHTML = "";
-    for (const m of p.models) {           // static fallback, shown immediately
-      const o = document.createElement("option");
-      o.value = m;
-      list.appendChild(o);
+    // Base URL field only for the OpenAI-compatible providers (ollama/nvidia).
+    const hasBase = !!p.baseUrl;
+    $("baseUrlRow").hidden = !hasBase;
+    if (hasBase) {
+      $("baseUrl").value = localStorage.getItem(LS_BASE + provider) || p.baseUrl;
+      $("baseUrl").placeholder = p.baseUrl;
     }
+    renderModelList(p.models);            // static fallback, shown immediately
     if (provider === "openrouter") {
       $("providerNote").textContent = "Loading the live model catalog…";
       loadOpenRouterModels()
         .then(renderOrModelList)
         .catch(() => { $("providerNote").textContent = p.note + " (couldn't load the live catalog — using suggestions)"; });
+    } else if (provider === "ollama-cloud") {
+      loadOllamaModels();                 // live refresh on top of the bundled list
     }
   };
   refreshAiMode();
@@ -1037,6 +1125,11 @@ function init() {
     if (k) localStorage.setItem(p.keyLS, k); else localStorage.removeItem(p.keyLS);
     const m = $("aiModel").value.trim();
     if (m) localStorage.setItem(p.modelLS, m); else localStorage.removeItem(p.modelLS);
+    if (p.baseUrl) {
+      const b = $("baseUrl").value.trim();
+      if (b && b !== p.baseUrl) localStorage.setItem(LS_BASE + provider, b);
+      else localStorage.removeItem(LS_BASE + provider);
+    }
     $("settingsModal").hidden = true;
     refreshAiMode();
     toast(k ? `Vee is powered by ${p.label}!` : "Vee is in offline mode");
