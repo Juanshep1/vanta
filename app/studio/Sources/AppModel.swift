@@ -470,7 +470,8 @@ final class AppModel: ObservableObject {
                     + "Find the bug, fix it, and return the COMPLETE corrected file in a ```va block```.",
             ]]
             var finalNote = ""
-            var stillFailing = true
+            var fixed = false
+            var lastError = errorText
             for round in 1...3 {
                 await MainActor.run { self.agentStatus = round == 1 ? "Fixing…" : "Still fixing (round \(round))…" }
                 let reply: String
@@ -485,32 +486,45 @@ final class AppModel: ObservableObject {
                     return
                 }
                 history.append(["role": "assistant", "content": reply])
-                guard let code = Self.firstCodeBlock(reply) else {
-                    finalNote = reply.isEmpty ? "Vee didn't return any code to apply." : reply
-                    break
+
+                // Pull out the candidate program and make sure it's actually a
+                // fix — weak models sometimes just echo the error message back.
+                // Never apply that; ask again instead of wrecking the file.
+                let candidate = Self.firstCodeBlock(reply) ?? AIClient.stripFences(reply)
+                if !Self.isPlausibleProgram(candidate, errorText: lastError) {
+                    history.append(["role": "user", "content": "That was not a corrected program — do NOT repeat the error message. Return ONLY the complete, fixed Vanta file inside a ```va code block```, nothing else."])
+                    continue
                 }
+
                 await MainActor.run {
-                    self.applyCode(code, toNewFile: false)        // auto-apply
+                    self.applyCode(candidate, toNewFile: false)        // auto-apply
                     self.agentStatus = "Running to check the fix…"
                     self.aiMessages.append(AIMessage(role: "assistant", text: "Applied a fix — running it to check…"))
                 }
-                let result = await self.runAndCapture(code, streaming: true)   // shows live in console
-                stillFailing = result.failed
-                if result.failed {
-                    await MainActor.run {
-                        self.aiMessages.append(AIMessage(role: "assistant", text: "Still erroring — trying again:\n```\n\(result.output.suffix(400))\n```"))
-                    }
-                    history.append(["role": "user", "content": "It still fails. The console now says:\n\(result.output)\n\nFix it and return the complete corrected file."])
-                    continue
-                } else {
+                let result = await self.runAndCapture(candidate, streaming: true)
+                if !result.failed {
+                    fixed = true
                     finalNote = "✅ Fixed it — runs clean now."
                     break
                 }
+                lastError = result.output
+                await MainActor.run {
+                    self.aiMessages.append(AIMessage(role: "assistant", text: "Still erroring — trying again:\n```\n\(result.output.suffix(400))\n```"))
+                }
+                history.append(["role": "user", "content": "It still fails. The console now says:\n\(result.output)\n\nFix it and return the complete corrected file."])
             }
+
             await MainActor.run {
-                self.lastRunFailed = stillFailing
-                if finalNote.isEmpty {
-                    finalNote = "I couldn't fully fix it after 3 tries — the console shows where it's still stuck. Try giving me a hint in chat."
+                if fixed {
+                    self.lastRunFailed = false
+                } else {
+                    // Never leave the user worse off: put their original code back.
+                    self.applyCode(firstFile, toNewFile: false)
+                    self.console = lastError
+                    self.lastRunFailed = true
+                    finalNote = "I couldn't fix this one automatically, so I put your original code back. "
+                        + "The error is:\n```\n\(lastError)\n```\n"
+                        + "Tell me what you intended, or try a stronger model in ⚙ AI Settings — small models often can't fix code reliably."
                 }
                 self.aiMessages.append(AIMessage(role: "assistant", text: finalNote))
                 self.aiBusy = false
@@ -531,6 +545,23 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: helpers
+
+    /// Guards the auto-fix: returns false when the "fix" isn't really a program
+    /// — e.g. a weak model that just echoed the error message back in a code
+    /// block. We must never apply that (it would overwrite the user's file with
+    /// the error text and re-fail forever).
+    static func isPlausibleProgram(_ code: String, errorText: String) -> Bool {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return false }
+        if trimmed.hasPrefix("Oops!") { return false }
+        if trimmed.contains("Traceback (most recent call last)") { return false }
+        // basically just the error line repeated back?
+        let errLine = errorText.split(separator: "\n").first.map(String.init) ?? ""
+        if !errLine.isEmpty && trimmed.contains(errLine) && trimmed.count < errLine.count + 60 {
+            return false
+        }
+        return true
+    }
 
     static func firstCodeBlock(_ text: String) -> String? {
         guard let open = text.range(of: "```") else { return nil }
