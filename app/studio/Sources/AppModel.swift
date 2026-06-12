@@ -42,6 +42,11 @@ final class AppModel: ObservableObject {
     @Published var agentMode = false
     @Published var agentStatus = ""
 
+    // AI model catalog (for the Settings dropdown)
+    @Published var modelCatalog: [String] = []
+    @Published var modelsLoading = false
+    @Published var modelError: String?
+
     private let runner = PythonRunner()
     private let settingsKey = "vanta-studio-ai-settings"
 
@@ -442,6 +447,32 @@ final class AppModel: ObservableObject {
         let rest = text[bodyStart...]
         guard let close = rest.range(of: "```") else { return nil }
         return String(rest[..<close.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: AI model catalog
+
+    func refreshModels() {
+        guard !settings.apiKey.isEmpty else {
+            modelError = "Add an API key first, then refresh."
+            return
+        }
+        modelsLoading = true
+        modelError = nil
+        let s = settings
+        Task { [weak self] in
+            do {
+                let list = try await AIClient.fetchModels(settings: s)
+                await MainActor.run {
+                    self?.modelCatalog = list
+                    self?.modelsLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    self?.modelError = error.localizedDescription
+                    self?.modelsLoading = false
+                }
+            }
+        }
     }
 
     // MARK: settings persistence

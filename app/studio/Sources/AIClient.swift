@@ -49,6 +49,47 @@ enum AIClient {
         return b.hasSuffix("/") ? String(b.dropLast()) : b
     }
 
+    // A short, known-good starter list per provider, shown in the dropdown
+    // before (or instead of) a live fetch. Press the refresh button to pull the
+    // provider's full live catalog.
+    static func curatedModels(for provider: String) -> [String] {
+        switch provider {
+        case "anthropic":
+            return ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"]
+        case "ollama-cloud":
+            return ["qwen3-coder:480b", "gpt-oss:120b", "deepseek-v3.1:671b"]
+        case "nvidia":
+            return ["nvidia/llama-3.3-nemotron-super-49b-v1.5", "meta/llama-3.3-70b-instruct"]
+        default:
+            return ["anthropic/claude-sonnet-4.6", "anthropic/claude-opus-4.8",
+                    "openai/gpt-4o", "google/gemini-2.5-flash"]
+        }
+    }
+
+    // Pull the provider's live model list (every provider here exposes a
+    // GET /models endpoint). Returns the model ids, sorted.
+    static func fetchModels(settings: AISettings) async throws -> [String] {
+        guard let url = URL(string: base(settings) + "/models") else { throw AIError.message("bad URL") }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 30
+        if settings.provider == "anthropic" {
+            req.setValue(settings.apiKey, forHTTPHeaderField: "x-api-key")
+            req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        } else {
+            req.setValue("Bearer \(settings.apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        let (data, _) = try await URLSession.shared.data(for: req)
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        if let err = json?["error"] as? [String: Any], let m = err["message"] as? String {
+            throw AIError.message(m)
+        }
+        if let arr = json?["data"] as? [[String: Any]] {
+            let ids = arr.compactMap { $0["id"] as? String }
+            if !ids.isEmpty { return ids.sorted() }
+        }
+        throw AIError.message("no models returned")
+    }
+
     static func chat(system: String, history: [[String: String]], settings: AISettings, maxTokens: Int = 4096) async throws -> String {
         if settings.provider == "anthropic" {
             return try await anthropic(system: system, history: history, settings: settings, maxTokens: maxTokens)
