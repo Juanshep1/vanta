@@ -335,6 +335,7 @@ function run() {
 
   if (hasFrame()) {
     showPane("canvasPane");
+    openBigCanvas();                       // games pop up big automatically
     canvas.focus();
     $("stopBtn").disabled = false;
     const loop = () => {
@@ -379,10 +380,22 @@ function logErr(s) {
 }
 
 function showPane(id) {
-  document.querySelectorAll(".bottom-tabs button").forEach((b) =>
+  document.querySelectorAll(".bottom-tabs button[data-pane]").forEach((b) =>
     b.classList.toggle("active", b.dataset.pane === id));
   document.querySelectorAll(".pane").forEach((p) =>
     p.classList.toggle("active", p.id === id));
+}
+
+function openBigCanvas() {
+  $("canvasBigHost").appendChild(canvas);
+  $("canvasModal").hidden = false;
+  canvas.focus();
+}
+
+function closeBigCanvas() {
+  $("canvasPane").insertBefore(canvas, $("canvasPane").firstChild);
+  $("canvasModal").hidden = true;
+  showPane("canvasPane");
 }
 
 /* =========================== syntax highlight =========================== */
@@ -607,11 +620,13 @@ Game loop: define to on_frame() ... end — the IDE calls it 30x/second after th
 
 RESPONSE RULES:
 - Be brief and warm. Explanations short; code complete.
-- When you create or modify a file, emit it as a fenced block exactly like:
+- EVERY code block you send MUST open its fence with the file header, exactly:
 ${F}va file=name.va
 ...entire file content...
 ${F}
-  The IDE turns these into one-click Apply buttons. Always send the COMPLETE file, not a diff.
+  The IDE turns these into one-click Apply/Run buttons. Always send the COMPLETE
+  file, never a diff or fragment. A block without file= gets applied to the
+  user's active file, so still send complete runnable files.
 - Default entry file is the user's active file. For new projects prefer one file unless asked.
 - Games MUST use on_frame() for animation — never an infinite while loop (it would freeze the page).
 
@@ -643,12 +658,17 @@ function mdToHtml(text) {
     } else {
       let body = parts[i];
       let fname = null;
-      const m = body.match(/^(?:va|vanta)?\s*(?:file=([\w./-]+))?\n/);
+      const m = body.match(/^(?:va|vanta)?[ \t]*(?:file=([\w./-]+))?[ \t]*\n/);
       if (m) { fname = m[1] || null; body = body.slice(m[0].length); }
-      if (fname) {
-        const id = "apply-" + Math.random().toString(36).slice(2);
-        const verb = files[fname] !== undefined ? "Update" : "Create";
-        html += `<button class="apply" data-file="${esc(fname)}" data-code="${encodeURIComponent(body)}" id="${id}">✓ ${verb} ${esc(fname)}</button>`;
+      // Every real code block gets Apply buttons — even when the model
+      // forgot the file= header (weaker models often do).
+      if (body.includes("\n") && body.trim().length > 0) {
+        const code = encodeURIComponent(body);
+        const label = fname
+          ? `${files[fname] !== undefined ? "Update" : "Create"} ${esc(fname)}`
+          : "Apply to current file";
+        html += `<button class="apply" data-file="${esc(fname || "")}" data-code="${code}">✓ ${label}</button>`;
+        html += `<button class="apply runit" data-file="${esc(fname || "")}" data-code="${code}">▶ Apply &amp; Run</button>`;
       }
       html += `<pre><code>${esc(body)}</code></pre>`;
     }
@@ -659,12 +679,16 @@ function mdToHtml(text) {
 function bindApplyButtons(container) {
   container.querySelectorAll(".apply").forEach((btn) => {
     btn.onclick = () => {
-      const name = btn.dataset.file;
+      const name = btn.dataset.file || active;        // no file= -> active file
       files[name] = decodeURIComponent(btn.dataset.code);
       openFile(name);
-      toast(`${name} saved — press Run!`);
-      btn.textContent = `✓ Applied ${name}`;
-      btn.disabled = true;
+      btn.textContent = `✓ Applied to ${name}`;
+      if (btn.classList.contains("runit")) {
+        run();
+        toast(`${name} saved & running!`);
+      } else {
+        toast(`${name} saved — press Run!`);
+      }
     };
   });
 }
@@ -917,8 +941,41 @@ function init() {
   document.addEventListener("click", () => menu.classList.remove("open"));
 
   // bottom panes
-  document.querySelectorAll(".bottom-tabs button").forEach((b) => {
+  document.querySelectorAll(".bottom-tabs button[data-pane]").forEach((b) => {
     b.onclick = () => showPane(b.dataset.pane);
+  });
+
+  // drag-resize the bottom panel
+  const bottom = $("bottom"), vr = $("vresize");
+  const savedH = parseInt(localStorage.getItem("vanta-studio-bottomh"), 10);
+  if (savedH) bottom.style.height = savedH + "px";
+  vr.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    vr.classList.add("dragging");
+    const startY = e.clientY, startH = bottom.offsetHeight;
+    const onMove = (ev) => {
+      const h = Math.min(window.innerHeight * 0.7,
+                Math.max(120, startH + (startY - ev.clientY)));
+      bottom.style.height = h + "px";
+    };
+    const onUp = () => {
+      vr.classList.remove("dragging");
+      localStorage.setItem("vanta-studio-bottomh", bottom.offsetHeight);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  });
+
+  // expand the canvas into a big overlay (same canvas keeps rendering)
+  $("expandCanvas").onclick = () => { showPane("canvasPane"); openBigCanvas(); };
+  $("canvasClose").onclick = closeBigCanvas;
+  $("canvasModal").addEventListener("click", (e) => {
+    if (e.target === $("canvasModal")) closeBigCanvas();
+  });
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("canvasModal").hidden) closeBigCanvas();
   });
 
   // AI

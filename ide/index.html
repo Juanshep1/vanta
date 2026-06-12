@@ -54,10 +54,12 @@
         <textarea id="code" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
       </div>
     </div>
-    <div class="bottom">
+    <div class="vresize" id="vresize" title="Drag to resize"></div>
+    <div class="bottom" id="bottom">
       <div class="bottom-tabs">
         <button data-pane="console" class="active">Console</button>
         <button data-pane="canvasPane">Canvas</button>
+        <button id="expandCanvas" class="expand-btn" title="Expand the canvas">&#x26F6; Expand</button>
         <span id="lineCol" class="linecol">1:1</span>
       </div>
       <pre id="console" class="pane active"></pre>
@@ -120,6 +122,17 @@
       <button id="settingsSave" class="primary">Save</button>
       <button id="settingsClose">Close</button>
     </div>
+  </div>
+</div>
+
+<!-- Big canvas overlay -->
+<div class="modal-back" id="canvasModal" hidden>
+  <div class="canvas-big">
+    <div class="canvas-big-bar">
+      <span>Canvas — click it so games hear your keys</span>
+      <button id="canvasClose">&#10005; Close</button>
+    </div>
+    <div id="canvasBigHost"></div>
   </div>
 </div>
 
