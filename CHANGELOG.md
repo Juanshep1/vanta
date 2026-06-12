@@ -1,5 +1,28 @@
 # Changelog
 
+## 4.1 — faster, and servers that handle real traffic
+- **~1.7× faster interpreter.** A focused pass on the hottest code paths (no
+  behaviour change — all 34 tests still pass). On the benchmark (`fib(27)` plus
+  a 300k-iteration loop) wall-clock dropped from **7.1s to ~4.3s**. What changed:
+  - The expression and statement dispatchers now check the most common node
+    types first (`arith`, `cmp`, `call`, `index`, `if`, `return`, `assign`)
+    instead of walking a long `if/elif` chain every time.
+  - A fast path for number math and comparisons skips the `isinstance` churn for
+    the common case of two plain numbers.
+  - Function calls got cheaper: no per-call error-label string, parameters are
+    written straight into the new scope, and a call frame no longer allocates an
+    empty set for constants until something is actually `fix`ed.
+  - `tools/benchmark.py` makes the number reproducible.
+- **Web servers now handle concurrent connections.** `serve` uses a threading
+  server, so one slow client (or a browser's parallel connections) no longer
+  blocks everything. The Vanta handler still runs under a lock — the interpreter
+  shares one global scope, so your request code runs one-at-a-time and never
+  races. Verified with 20 simultaneous requests in the test run.
+
+Honest note: this is a tree-walking interpreter, so it's still slower per
+operation than C/Rust/V8. ~1.7× is what surgical tuning buys; a big further jump
+would mean compiling to bytecode (a much larger project), not micro-tuning.
+
 ## 4.0 — Vanta goes full-stack (the web)
 Vanta can now build the things Python, JavaScript, or Go can — real web
 servers and API clients, not just console scripts. New builtins:

@@ -28,7 +28,7 @@ import math
 import subprocess
 import random
 
-VERSION = "4.0"
+VERSION = "4.1"
 
 # Command-line arguments passed to a Vanta program (after the script name).
 PROGRAM_ARGS = []
@@ -850,9 +850,13 @@ _MISSING = object()
 
 
 class Environment:
+    # `consts` (names fixed with 'fix') defaults to a shared empty frozenset, so
+    # the common environment — a function call frame — costs nothing extra. The
+    # first 'fix' in a scope upgrades it to a real, mutable set.
+    consts = frozenset()
+
     def __init__(self, parent=None):
         self.vars = {}
-        self.consts = set()      # names fixed with 'fix' and not reassignable
         self.parent = parent
 
     def get(self, name):
@@ -868,6 +872,8 @@ class Environment:
 
     def fix(self, name, value):
         self.vars[name] = value
+        if type(self.consts) is frozenset:
+            self.consts = set()
         self.consts.add(name)
 
     def assign(self, name, value):
@@ -896,35 +902,66 @@ class ContinueLoop(Exception):
 
 
 def run_block(stmts, env):
+    # The per-statement try/except attaches a line number to runtime errors.
+    # Inlined here (rather than via a run_stmt helper) to avoid a function call
+    # on every statement — this is one of the hottest loops in the interpreter.
     for stmt in stmts:
-        run_stmt(stmt, env)
+        try:
+            _run_stmt(stmt, env)
+        except VantaError as e:
+            if str(e).startswith("line "):
+                raise
+            raise VantaError(f"line {stmt[1]}: {e}")
 
 
 def run_stmt(stmt, env):
-    lineno = stmt[1]
     try:
         _run_stmt(stmt, env)
     except VantaError as e:
         if str(e).startswith("line "):
             raise
-        raise VantaError(f"line {lineno}: {e}")
+        raise VantaError(f"line {stmt[1]}: {e}")
 
 
 def _run_stmt(stmt, env):
     tag = stmt[0]
 
-    if tag == "say":
-        node = stmt[2]
-        print("" if node is None else display(eval_expr(node, env)))
+    # --- hot statement types first (kept near the top for dispatch speed) ---
+
+    if tag == "if":
+        _, _, branches, else_body = stmt
+        for cond, body in branches:
+            if truthy(eval_expr(cond, env)):
+                run_block(body, env)
+                return
+        run_block(else_body, env)
+
+    elif tag == "return":
+        raise ReturnSignal(eval_expr(stmt[2], env))
+
+    elif tag == "assign":
+        do_assign(stmt[2], eval_expr(stmt[3], env), env)
 
     elif tag == "let":
         env.define(stmt[2], eval_expr(stmt[3], env))
 
+    elif tag == "expr":
+        eval_expr(stmt[2], env)
+
+    elif tag == "mutate":
+        _, _, target_node, sign, amount_node = stmt
+        current = eval_expr(target_node, env)
+        new_value = arithmetic(sign, current, eval_expr(amount_node, env))
+        do_assign(target_node, new_value, env)
+
+    elif tag == "say":
+        node = stmt[2]
+        print("" if node is None else display(eval_expr(node, env)))
+
+    # --- everything else ---
+
     elif tag == "fix":
         env.fix(stmt[2], eval_expr(stmt[3], env))
-
-    elif tag == "assign":
-        do_assign(stmt[2], eval_expr(stmt[3], env), env)
 
     elif tag == "let_multi":
         names, value_nodes = stmt[2], stmt[3]
@@ -947,14 +984,6 @@ def _run_stmt(stmt, env):
         prompt = "" if stmt[2] is None else display(eval_expr(stmt[2], env))
         answer = input(prompt + " " if prompt else "")
         env.define(stmt[3], smart_value(answer))
-
-    elif tag == "if":
-        _, _, branches, else_body = stmt
-        for cond, body in branches:
-            if truthy(eval_expr(cond, env)):
-                run_block(body, env)
-                return
-        run_block(else_body, env)
 
     elif tag == "repeat":
         count = eval_expr(stmt[2], env)
@@ -1000,12 +1029,6 @@ def _run_stmt(stmt, env):
             except ContinueLoop:
                 continue
 
-    elif tag == "mutate":
-        _, _, target_node, sign, amount_node = stmt
-        current = eval_expr(target_node, env)
-        new_value = arithmetic(sign, current, eval_expr(amount_node, env))
-        do_assign(target_node, new_value, env)
-
     elif tag == "match":
         _, _, subject_node, branches, else_body = stmt
         subject = eval_expr(subject_node, env)
@@ -1049,17 +1072,11 @@ def _run_stmt(stmt, env):
             env.define(errname, clean_message(str(e)))
             run_block(rescue_body, env)
 
-    elif tag == "return":
-        raise ReturnSignal(eval_expr(stmt[2], env))
-
     elif tag == "stop":
         raise BreakLoop()
 
     elif tag == "skip":
         raise ContinueLoop()
-
-    elif tag == "expr":
-        eval_expr(stmt[2], env)
 
     elif tag == "import":
         import_file(display(eval_expr(stmt[2], env)))
@@ -1095,6 +1112,27 @@ def eval_expr(node, env):
             return BUILTIN_VALUES[node[1]]
         raise VantaError(f"I don't know what '{node[1]}' is yet")
 
+    # --- hot node types first (kept near the top for dispatch speed) ---
+
+    if tag == "arith":
+        return arithmetic(node[1], eval_expr(node[2], env), eval_expr(node[3], env))
+
+    if tag == "cmp":
+        return compare(node[1], eval_expr(node[2], env), eval_expr(node[3], env))
+
+    if tag == "call":
+        callee = resolve_callee(node[1], env)
+        args = [eval_expr(a, env) for a in node[2]]
+        return apply_callable(callee, args)
+
+    if tag == "index":
+        return get_index(eval_expr(node[1], env), eval_expr(node[2], env))
+
+    if tag == "getattr":
+        return get_attr(eval_expr(node[1], env), node[2])
+
+    # --- everything else ---
+
     if tag == "format":
         return "".join(display(eval_expr(part, env)) for part in node[1])
 
@@ -1125,9 +1163,6 @@ def eval_expr(node, env):
         if truthy(eval_expr(node[1], env)):
             return True
         return truthy(eval_expr(node[2], env))
-
-    if tag == "cmp":
-        return compare(node[1], eval_expr(node[2], env), eval_expr(node[3], env))
 
     if tag == "isa":
         target = eval_expr(node[2], env)
@@ -1171,12 +1206,6 @@ def eval_expr(node, env):
                 result[eval_expr(key_expr, loop_env)] = eval_expr(val_expr, loop_env)
         return result
 
-    if tag == "arith":
-        return arithmetic(node[1], eval_expr(node[2], env), eval_expr(node[3], env))
-
-    if tag == "index":
-        return get_index(eval_expr(node[1], env), eval_expr(node[2], env))
-
     if tag == "sliceop":
         target = eval_expr(node[1], env)
         if not isinstance(target, (list, str)):
@@ -1187,14 +1216,6 @@ def eval_expr(node, env):
             if bound is not None and (isinstance(bound, bool) or not isinstance(bound, int)):
                 raise VantaError("slice positions must be whole numbers")
         return target[start:end]
-
-    if tag == "getattr":
-        return get_attr(eval_expr(node[1], env), node[2])
-
-    if tag == "call":
-        callee = resolve_callee(node[1], env)
-        args = [eval_expr(a, env) for a in node[2]]
-        return apply_callable(callee, args)
 
     raise VantaError(f"internal error: unknown expression {tag}")
 
@@ -1227,22 +1248,26 @@ def apply_callable(callee, args):
     raise VantaError("that value is not a function you can call")
 
 
-def bind_params(label, params, args, local):
-    if len(args) > len(params):
-        raise VantaError(f"{label} takes at most {len(params)} value(s), "
-                         f"but got {len(args)}")
+def bind_params(name, params, args, local):
+    # Writes straight into local.vars and only builds the (quoted) error label
+    # on the failure paths — this runs on every function/method call.
+    nargs = len(args)
+    if nargs > len(params):
+        raise VantaError(f"'{name}' takes at most {len(params)} value(s), "
+                         f"but got {nargs}")
+    lv = local.vars
     for i, (pname, default) in enumerate(params):
-        if i < len(args):
-            local.define(pname, args[i])
+        if i < nargs:
+            lv[pname] = args[i]
         elif default is not None:
-            local.define(pname, eval_expr(default, local))
+            lv[pname] = eval_expr(default, local)
         else:
-            raise VantaError(f"{label} is missing a value for '{pname}'")
+            raise VantaError(f"'{name}' is missing a value for '{pname}'")
 
 
 def call_function(fn, args):
     local = Environment(fn.defining_env or GLOBAL_ENV)
-    bind_params(f"'{fn.name}'", fn.params, args, local)
+    bind_params(fn.name, fn.params, args, local)
     try:
         run_block(fn.body, local)
     except ReturnSignal as r:
@@ -1252,10 +1277,11 @@ def call_function(fn, args):
 
 def call_method(inst, fn, args):
     local = Environment(GLOBAL_ENV)
-    local.define("me", inst)
+    lv = local.vars
+    lv["me"] = inst
     parent_type = fn.owner.parent if getattr(fn, "owner", None) else None
-    local.define("super", SuperProxy(inst, parent_type))
-    bind_params(f"'{fn.name}'", fn.params, args, local)
+    lv["super"] = SuperProxy(inst, parent_type)
+    bind_params(fn.name, fn.params, args, local)
     try:
         run_block(fn.body, local)
     except ReturnSignal as r:
@@ -1348,6 +1374,31 @@ def do_assign(target, value, env):
 # --------------------------------------------------------------------------
 
 def arithmetic(op, a, b):
+    # Fast path: both operands are plain numbers (the overwhelmingly common
+    # case). `type(x) is int` excludes bool — booleans aren't numbers here — so
+    # this is exactly as strict as check_numbers, but without the isinstance
+    # calls and the list/text special-casing below.
+    ta = type(a)
+    tb = type(b)
+    if (ta is int or ta is float) and (tb is int or tb is float):
+        if op == "+":
+            return a + b
+        if op == "-":
+            return a - b
+        if op == "*":
+            return a * b
+        if op == "%":
+            if b == 0:
+                raise VantaError("you can't take the remainder with zero")
+            return a % b
+        if op == "^":
+            return a ** b
+        if op == "/":
+            if b == 0:
+                raise VantaError("you can't divide by zero")
+            result = a / b
+            return int(result) if result == int(result) else result
+
     if op == "+":
         if isinstance(a, list) and isinstance(b, list):
             return a + b
@@ -1390,9 +1441,10 @@ def compare(op, a, b):
         return a == b
     if op == "!=":
         return a != b
-    both_numbers = (isinstance(a, (int, float)) and isinstance(b, (int, float))
-                    and not isinstance(a, bool) and not isinstance(b, bool))
-    both_text = isinstance(a, str) and isinstance(b, str)
+    ta = type(a)
+    tb = type(b)
+    both_numbers = (ta is int or ta is float) and (tb is int or tb is float)
+    both_text = ta is str and tb is str
     if not (both_numbers or both_text):
         raise VantaError("I can only compare numbers with numbers, or text with text")
     if op == ">":
@@ -2239,7 +2291,13 @@ def b_serve(args):
                          "request map and gives back a page (text or a map)")
 
     import urllib.parse
-    from http.server import HTTPServer, BaseHTTPRequestHandler
+    import threading
+    from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+
+    # Slow clients get their own thread (so one can't block the whole server),
+    # but the Vanta handler itself runs under a lock — the interpreter shares
+    # one global scope, so handlers run one at a time and never race.
+    handler_lock = threading.Lock()
 
     class VantaHandler(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -2265,7 +2323,8 @@ def b_serve(args):
                        "headers": {k: v for k, v in self.headers.items()},
                        "body": body}
             try:
-                result = apply_callable(handler, [request])
+                with handler_lock:
+                    result = apply_callable(handler, [request])
             except VantaError as e:
                 self._reply(500, f"Vanta error: {e}", "text/plain; charset=utf-8", {})
                 return
@@ -2294,7 +2353,8 @@ def b_serve(args):
         def do_PATCH(self):   self._handle("PATCH")
         def do_HEAD(self):    self._handle("HEAD")
 
-    server = HTTPServer(("", port), VantaHandler)
+    server = ThreadingHTTPServer(("", port), VantaHandler)
+    server.daemon_threads = True
     print(f"Vanta server running on http://localhost:{port}  "
           f"(press Stop / Ctrl-C to quit)")
     sys.stdout.flush()
@@ -2555,7 +2615,8 @@ def reset_runtime():
     """Clear all program state so a host (REPL, IDE, playground) can run a
     fresh program without restarting the interpreter."""
     GLOBAL_ENV.vars.clear()
-    GLOBAL_ENV.consts.clear()
+    if type(GLOBAL_ENV.consts) is not frozenset:
+        GLOBAL_ENV.consts.clear()
     GLOBAL_ENV.define("pi", math.pi)
     GLOBAL_ENV.define("e", math.e)
     IMPORTED.clear()
