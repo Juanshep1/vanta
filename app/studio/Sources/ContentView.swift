@@ -167,10 +167,119 @@ struct EditorArea: View {
             }
             .background(Theme.bg)
 
-            CodeEditor(text: binding)
+            CodeEditor(text: binding,
+                       onInlineEdit: { range, sel in model.beginInlineEdit(range: range, selection: sel) },
+                       requestCompletion: { prefix, suffix, done in
+                           model.requestCompletion(prefix: prefix, suffix: suffix, done: done)
+                       },
+                       autocompleteEnabled: model.settings.autocomplete)
                 .id(model.activeID)
         }
         .background(Theme.nbgColor)
+        .overlay(alignment: .top) {
+            if model.inlinePhase != .idle { InlineEditSheet().environmentObject(model) }
+        }
+    }
+}
+
+// MARK: - ⌘K inline edit overlay
+
+struct InlineEditSheet: View {
+    @EnvironmentObject var model: AppModel
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 7) {
+                Image(systemName: "command").font(.system(size: 11, weight: .bold)).foregroundColor(Theme.accent)
+                Text("Inline edit").font(.system(size: 12.5, weight: .semibold))
+                Spacer()
+                Button { model.cancelInlineEdit() } label: {
+                    Image(systemName: "xmark").font(.system(size: 10))
+                }.buttonStyle(.plain).foregroundColor(Theme.muted)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 9)
+
+            Divider().overlay(Theme.line)
+
+            if model.inlinePhase == .prompting || model.inlinePhase == .generating {
+                HStack(spacing: 8) {
+                    TextField("Tell Vee how to change this code…", text: $model.inlinePrompt)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                        .foregroundColor(Theme.ink)
+                        .focused($focused)
+                        .onSubmit { model.submitInlineEdit() }
+                        .disabled(model.inlinePhase == .generating)
+                    if model.inlinePhase == .generating {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button { model.submitInlineEdit() } label: {
+                            Text("Generate ⏎").font(.system(size: 11.5, weight: .semibold))
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(Theme.accentDim).foregroundColor(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }.buttonStyle(.plain)
+                    }
+                }
+                .padding(12)
+                .onAppear { focused = true }
+                if let err = model.inlineError {
+                    Text(err).font(.system(size: 11.5)).foregroundColor(Theme.red)
+                        .padding(.horizontal, 12).padding(.bottom, 10)
+                }
+            } else if model.inlinePhase == .reviewing {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(model.inlineDiff) { line in
+                            HStack(spacing: 6) {
+                                Text(symbol(line.kind)).font(.system(size: 12, design: .monospaced))
+                                    .foregroundColor(color(line.kind)).frame(width: 12, alignment: .leading)
+                                Text(line.text.isEmpty ? " " : line.text)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundColor(line.kind == .remove ? Theme.muted : Theme.ink)
+                                    .strikethrough(line.kind == .remove)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 1)
+                            .background(bg(line.kind))
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+                .frame(maxHeight: 260)
+                Divider().overlay(Theme.line)
+                HStack(spacing: 8) {
+                    Spacer()
+                    Button { model.cancelInlineEdit() } label: {
+                        Text("Reject").font(.system(size: 12, weight: .semibold))
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(Theme.panel2).foregroundColor(Theme.ink)
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.line))
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }.buttonStyle(.plain).keyboardShortcut(.cancelAction)
+                    Button { model.acceptInlineEdit() } label: {
+                        Text("Accept ⏎").font(.system(size: 12, weight: .semibold))
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(Theme.green).foregroundColor(.black)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }.buttonStyle(.plain).keyboardShortcut(.defaultAction)
+                }
+                .padding(12)
+            }
+        }
+        .frame(width: 460)
+        .background(Theme.panel)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line, lineWidth: 1))
+        .shadow(color: .black.opacity(0.45), radius: 24, y: 10)
+        .padding(.top, 14)
+    }
+
+    func symbol(_ k: DiffKind) -> String { k == .add ? "+" : (k == .remove ? "−" : "") }
+    func color(_ k: DiffKind) -> Color { k == .add ? Theme.green : (k == .remove ? Theme.red : Theme.muted) }
+    func bg(_ k: DiffKind) -> Color {
+        k == .add ? Theme.green.opacity(0.12) : (k == .remove ? Theme.red.opacity(0.10) : Color.clear)
     }
 }
 

@@ -5,6 +5,19 @@ struct AISettings: Codable, Equatable {
     var apiKey: String = ""
     var model: String = "anthropic/claude-sonnet-4.6"
     var baseURL: String = ""               // optional override (local Ollama / proxy)
+    var autocomplete: Bool = true
+
+    init() {}
+
+    enum CodingKeys: String, CodingKey { case provider, apiKey, model, baseURL, autocomplete }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? "openrouter"
+        apiKey = try c.decodeIfPresent(String.self, forKey: .apiKey) ?? ""
+        model = try c.decodeIfPresent(String.self, forKey: .model) ?? "anthropic/claude-sonnet-4.6"
+        baseURL = try c.decodeIfPresent(String.self, forKey: .baseURL) ?? ""
+        autocomplete = try c.decodeIfPresent(Bool.self, forKey: .autocomplete) ?? true
+    }
 }
 
 enum AIError: LocalizedError {
@@ -36,17 +49,36 @@ enum AIClient {
         return b.hasSuffix("/") ? String(b.dropLast()) : b
     }
 
-    static func chat(system: String, history: [[String: String]], settings: AISettings) async throws -> String {
+    static func chat(system: String, history: [[String: String]], settings: AISettings, maxTokens: Int = 4096) async throws -> String {
         if settings.provider == "anthropic" {
-            return try await anthropic(system: system, history: history, settings: settings)
+            return try await anthropic(system: system, history: history, settings: settings, maxTokens: maxTokens)
         }
-        return try await openAICompatible(system: system, history: history, settings: settings)
+        return try await openAICompatible(system: system, history: history, settings: settings, maxTokens: maxTokens)
     }
 
-    private static func openAICompatible(system: String, history: [[String: String]], settings: AISettings) async throws -> String {
+    // Short single-shot completion for ghost-text autocomplete.
+    static func complete(prefix: String, suffix: String, settings: AISettings) async throws -> String {
+        let sys = "You are an autocomplete engine for the Vanta programming language. Given the code before and after the cursor, output ONLY the raw text to insert at the cursor — the natural continuation. No explanations, no markdown fences. Usually just finish the current line or add a couple of lines. Vanta uses plain-English syntax: say, let X be, change X to, if/otherwise/end, for each X in, to NAME(...)/give back/end, repeat N times/end."
+        let user = "CODE BEFORE CURSOR:\n\(prefix)\n\nCODE AFTER CURSOR:\n\(suffix)\n\nText to insert at the cursor:"
+        var out = try await chat(system: sys, history: [["role": "user", "content": user]], settings: settings, maxTokens: 90)
+        out = stripFences(out)
+        return out
+    }
+
+    static func stripFences(_ s: String) -> String {
+        var t = s
+        if let r = t.range(of: "```") {
+            t.removeSubrange(t.startIndex..<r.upperBound)
+            if let firstNL = t.firstIndex(of: "\n") { t = String(t[t.index(after: firstNL)...]) }
+            if let close = t.range(of: "```", options: .backwards) { t = String(t[..<close.lowerBound]) }
+        }
+        return t
+    }
+
+    private static func openAICompatible(system: String, history: [[String: String]], settings: AISettings, maxTokens: Int) async throws -> String {
         var messages: [[String: String]] = [["role": "system", "content": system]]
         messages.append(contentsOf: history)
-        let body: [String: Any] = ["model": settings.model, "max_tokens": 4096, "messages": messages]
+        let body: [String: Any] = ["model": settings.model, "max_tokens": maxTokens, "messages": messages]
 
         guard let url = URL(string: base(settings) + "/chat/completions") else { throw AIError.message("bad URL") }
         var req = URLRequest(url: url)
@@ -65,10 +97,10 @@ enum AIClient {
         throw AIError.message("empty response")
     }
 
-    private static func anthropic(system: String, history: [[String: String]], settings: AISettings) async throws -> String {
+    private static func anthropic(system: String, history: [[String: String]], settings: AISettings, maxTokens: Int) async throws -> String {
         let body: [String: Any] = [
             "model": settings.model.isEmpty ? "claude-sonnet-4-6" : settings.model,
-            "max_tokens": 4096,
+            "max_tokens": maxTokens,
             "system": system,
             "messages": history,
         ]

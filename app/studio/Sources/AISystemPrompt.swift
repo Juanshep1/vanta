@@ -20,4 +20,12 @@ enum AISystemPrompt {
 
     When you write a program, put it in a fenced ```va code block``` so the IDE shows an Apply button. Always send a COMPLETE runnable file. Note: this IDE runs console programs (it does not have the browser canvas, so no game/drawing API here).
     """
+
+    static var editSystem: String {
+        base + "\n\nEDIT MODE: You are given a snippet of Vanta code and an instruction. Rewrite the snippet to satisfy the instruction. Return ONLY the rewritten snippet as raw Vanta code — no markdown fences, no commentary, no explanation. Preserve the surrounding indentation style."
+    }
+
+    static var agentSystem: String {
+        base + "\n\nBUILD MODE: Write a COMPLETE, runnable Vanta program in a single ```va code block```. The IDE will run it for you and show you the output. If the output contains an error (a line starting with 'Oops!' or a traceback), fix the program and return the COMPLETE corrected file again in a ```va block```. Keep iterating until it runs cleanly. Keep replies short — mostly just the code block."
+    }
 }

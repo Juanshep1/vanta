@@ -28,6 +28,20 @@ final class AppModel: ObservableObject {
     @Published var aiBusy = false
     @Published var settings = AISettings()
 
+    // ⌘K inline edit
+    enum InlinePhase { case idle, prompting, generating, reviewing }
+    @Published var inlinePhase: InlinePhase = .idle
+    @Published var inlinePrompt = ""
+    @Published var inlineDiff: [DiffLine] = []
+    @Published var inlineError: String?
+    private var inlineRange = NSRange(location: 0, length: 0)
+    private var inlineOriginal = ""     // the selected text being edited
+    private var inlineProposed = ""     // the AI's rewrite
+
+    // Agent (build + self-fix) mode
+    @Published var agentMode = false
+    @Published var agentStatus = ""
+
     private let runner = PythonRunner()
     private let settingsKey = "vanta-studio-ai-settings"
 
@@ -219,6 +233,201 @@ final class AppModel: ObservableObject {
                 files[idx].content = code
             }
         }
+    }
+
+    // MARK: ⌘K inline edit
+
+    func beginInlineEdit(range: NSRange, selection: String) {
+        guard !settings.apiKey.isEmpty else {
+            statusText = "Add an API key in ⚙ to use ⌘K inline edit"
+            return
+        }
+        // If nothing is selected, operate on the whole current line(s) at the cursor.
+        var r = range
+        var sel = selection
+        if r.length == 0, let full = activeFile?.content {
+            let ns = full as NSString
+            let line = ns.lineRange(for: NSRange(location: min(r.location, ns.length), length: 0))
+            r = line
+            sel = ns.substring(with: line)
+        }
+        inlineRange = r
+        inlineOriginal = sel
+        inlinePrompt = ""
+        inlineError = nil
+        inlineDiff = []
+        inlinePhase = .prompting
+    }
+
+    func submitInlineEdit() {
+        let instruction = inlinePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !instruction.isEmpty else { return }
+        inlinePhase = .generating
+        inlineError = nil
+        let snippet = inlineOriginal
+        let fileContext = activeFile?.content ?? ""
+        let s = settings
+        let user = """
+        Here is the full file for context:
+        ```
+        \(fileContext)
+        ```
+
+        Rewrite ONLY this selected snippet:
+        ```
+        \(snippet)
+        ```
+
+        Instruction: \(instruction)
+
+        Return only the rewritten snippet.
+        """
+        Task { [weak self] in
+            do {
+                var reply = try await AIClient.chat(system: AISystemPrompt.editSystem,
+                                                     history: [["role": "user", "content": user]],
+                                                     settings: s, maxTokens: 1500)
+                reply = AIClient.stripFences(reply)
+                // trim a single trailing newline mismatch so the diff is clean
+                if reply.hasSuffix("\n") && !snippet.hasSuffix("\n") { reply = String(reply.dropLast()) }
+                await MainActor.run {
+                    guard let self else { return }
+                    self.inlineProposed = reply
+                    self.inlineDiff = LineDiff.diff(self.inlineOriginal, reply)
+                    self.inlinePhase = .reviewing
+                }
+            } catch {
+                await MainActor.run {
+                    self?.inlineError = error.localizedDescription
+                    self?.inlinePhase = .prompting
+                }
+            }
+        }
+    }
+
+    func acceptInlineEdit() {
+        guard let idx = files.firstIndex(where: { $0.id == activeID }) else { inlinePhase = .idle; return }
+        let ns = files[idx].content as NSString
+        guard inlineRange.location + inlineRange.length <= ns.length else { inlinePhase = .idle; return }
+        let updated = ns.replacingCharacters(in: inlineRange, with: inlineProposed)
+        files[idx].content = updated
+        files[idx].dirty = true
+        inlinePhase = .idle
+        statusText = "Applied ⌘K edit"
+    }
+
+    func cancelInlineEdit() {
+        inlinePhase = .idle
+        inlineError = nil
+        inlineDiff = []
+    }
+
+    // MARK: Agent (build → run → self-fix loop)
+
+    /// Run the given source and return everything it printed (stdout + stderr).
+    func runAndCapture(_ code: String) async -> String {
+        guard let vpy = vantaPyURL else { return "Bundled vanta.py not found." }
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("vanta-agent-run.va")
+        try? code.write(to: tmp, atomically: true, encoding: .utf8)
+        return await withCheckedContinuation { cont in
+            var buffer = ""
+            self.runner.run(vantaPy: vpy, sourceFile: tmp,
+                onOutput: { s in buffer += s },
+                onFinish: { _ in cont.resume(returning: buffer) })
+        }
+    }
+
+    private static func looksLikeError(_ output: String) -> Bool {
+        let needles = ["Oops!", "Traceback (most recent call last)", "Internal error", "SyntaxError", "Error:"]
+        return needles.contains { output.contains($0) }
+    }
+
+    func agentBuild(_ goal: String) {
+        guard !aiBusy else { return }
+        guard !settings.apiKey.isEmpty else {
+            aiMessages.append(AIMessage(role: "assistant", text: "Add an API key in ⚙ AI Settings to use Agent mode."))
+            return
+        }
+        aiMessages.append(AIMessage(role: "user", text: goal))
+        aiBusy = true
+        agentStatus = "Thinking…"
+        let s = settings
+        Task { [weak self] in
+            guard let self else { return }
+            var history: [[String: String]] = [["role": "user", "content": goal]]
+            var lastCode = ""
+            var finalNote = ""
+            let maxRounds = 4
+            for round in 1...maxRounds {
+                await MainActor.run { self.agentStatus = "Writing code (round \(round))…" }
+                let reply: String
+                do {
+                    reply = try await AIClient.chat(system: AISystemPrompt.agentSystem,
+                                                    history: history, settings: s, maxTokens: 4096)
+                } catch {
+                    await MainActor.run {
+                        self.aiMessages.append(AIMessage(role: "assistant", text: "Error: \(error.localizedDescription)"))
+                        self.aiBusy = false; self.agentStatus = ""
+                    }
+                    return
+                }
+                history.append(["role": "assistant", "content": reply])
+                guard let code = Self.firstCodeBlock(reply) else {
+                    finalNote = reply
+                    break
+                }
+                lastCode = code
+                await MainActor.run {
+                    self.applyCode(code, toNewFile: false)
+                    self.agentStatus = "Running (round \(round))…"
+                    self.aiMessages.append(AIMessage(role: "assistant", text: "Round \(round): wrote \(code.components(separatedBy: "\n").count) lines — running it…"))
+                }
+                let output = await self.runAndCapture(code)
+                if Self.looksLikeError(output) {
+                    await MainActor.run {
+                        self.aiMessages.append(AIMessage(role: "assistant", text: "Hit an error — fixing it:\n```\n\(output.suffix(500))\n```"))
+                    }
+                    history.append(["role": "user", "content": "When I ran that, it printed:\n\(output)\n\nFix the program and return the complete corrected file."])
+                    continue
+                } else {
+                    finalNote = "Done — it ran cleanly. Output:\n```\n\(output.isEmpty ? "(no output)" : output)\n```"
+                    break
+                }
+            }
+            await MainActor.run {
+                if !finalNote.isEmpty {
+                    self.aiMessages.append(AIMessage(role: "assistant", text: finalNote))
+                }
+                self.console = ""
+                self.aiBusy = false
+                self.agentStatus = ""
+                _ = lastCode
+            }
+        }
+    }
+
+    // MARK: autocomplete (ghost text)
+
+    func requestCompletion(prefix: String, suffix: String, done: @escaping (String?) -> Void) {
+        guard settings.autocomplete, !settings.apiKey.isEmpty else { done(nil); return }
+        let s = settings
+        Task {
+            let result = try? await AIClient.complete(prefix: prefix, suffix: suffix, settings: s)
+            await MainActor.run { done(result) }
+        }
+    }
+
+    // MARK: helpers
+
+    static func firstCodeBlock(_ text: String) -> String? {
+        guard let open = text.range(of: "```") else { return nil }
+        // skip the language tag / file attribute on the opening fence line
+        let afterOpen = text[open.upperBound...]
+        guard let firstNL = afterOpen.firstIndex(of: "\n") else { return nil }
+        let bodyStart = afterOpen.index(after: firstNL)
+        let rest = text[bodyStart...]
+        guard let close = rest.range(of: "```") else { return nil }
+        return String(rest[..<close.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: settings persistence

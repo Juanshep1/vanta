@@ -2,7 +2,9 @@
 
 A real, native macOS IDE for Vanta — SwiftUI + AppKit, no webview. Unlike the
 browser IDE (which runs Vanta in WebAssembly), this runs your code **natively
-through python3 at full speed**, with real files on disk.
+through python3 at full speed**, with real files on disk. It works like an
+AI-first editor (think Cursor, but for Vanta): ⌘K inline edits, an agent that
+writes-runs-fixes on its own, and tab-to-accept autocomplete.
 
 ![native](../../assets/logo.png)
 
@@ -32,7 +34,17 @@ Vanta interpreter and standard library and shells out to your system python3).
   Because it calls providers with `URLSession` (not a browser), there are **no
   CORS limits**: OpenRouter, Anthropic, **Ollama Cloud**, and **NVIDIA NIM** all
   work directly. Generated code blocks get one-click **Apply** / **New file**.
-- **Menus & shortcuts** — Cmd-R run, Cmd-. stop, Cmd-N new, Cmd-O open, Cmd-S save.
+- **⌘K inline edit** — select code (or just a line), press ⌘K, say what to change
+  in plain English, and review Vee's rewrite as a line diff before you Accept (⏎)
+  or Reject (Esc).
+- **Agent mode** — flip "Agent" on in the Vee panel and give it a goal. Vee
+  writes a program, **runs it natively, reads the output, and fixes its own
+  errors** in a loop until it runs clean. (This is the thing the browser IDE
+  can't do — the native app actually executes the code.)
+- **AI tab-autocomplete** — ghost-text suggestions as you type; press **Tab** to
+  accept. Toggle in AI Settings.
+- **Menus & shortcuts** — Cmd-R run, Cmd-. stop, Cmd-N new, Cmd-O open, Cmd-S
+  save, **Cmd-K inline edit**.
 
 ## Notes
 

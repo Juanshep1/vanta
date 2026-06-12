@@ -1,10 +1,76 @@
 import SwiftUI
 import AppKit
 
-// A native code editor: a TextKit-1 NSTextView with Vanta syntax highlighting
-// and a line-number ruler, wrapped for SwiftUI.
+// NSTextView subclass with the Cursor-style superpowers: ⌘K inline edit,
+// AI ghost-text autocomplete, and Tab-to-accept.
+final class VantaTextView: NSTextView {
+    var onCmdK: ((NSRange, String) -> Void)?
+    var onTyped: (() -> Void)?
+    var ghost: String? { didSet { needsDisplay = true } }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.contains(.command),
+           event.charactersIgnoringModifiers?.lowercased() == "k" {
+            let range = selectedRange()
+            let sel = (string as NSString).substring(with: range)
+            onCmdK?(range, sel)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func insertTab(_ sender: Any?) {
+        if let g = ghost, !g.isEmpty {
+            insertText(g, replacementRange: selectedRange())
+            ghost = nil
+            return
+        }
+        super.insertTab(sender)
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        if ghost != nil { ghost = nil; return }
+        super.cancelOperation(sender)
+    }
+
+    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
+        if ghost != nil { ghost = nil }
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard let g = ghost, !g.isEmpty, let lm = layoutManager, let tc = textContainer else { return }
+        let loc = selectedRange().location
+        let s = string as NSString
+        var origin = NSPoint(x: textContainerInset.width, y: textContainerInset.height)
+        if loc > 0 && loc <= s.length {
+            let glyphRange = lm.glyphRange(forCharacterRange: NSRange(location: loc - 1, length: 1), actualCharacterRange: nil)
+            let r = lm.boundingRect(forGlyphRange: glyphRange, in: tc)
+            origin = NSPoint(x: r.maxX + textContainerInset.width, y: r.minY + textContainerInset.height)
+        }
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
+            .foregroundColor: NSColor.systemGray.withAlphaComponent(0.55),
+        ]
+        // draw only the first line of the suggestion inline; rest below
+        let lines = g.components(separatedBy: "\n")
+        (lines[0] as NSString).draw(at: origin, withAttributes: attrs)
+        if lines.count > 1 {
+            let lineH = (font ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)).boundingRectForFont.height
+            for (k, ln) in lines.dropFirst().enumerated() {
+                let p = NSPoint(x: textContainerInset.width, y: origin.y + CGFloat(k + 1) * lineH)
+                (ln as NSString).draw(at: p, withAttributes: attrs)
+            }
+        }
+    }
+}
+
 struct CodeEditor: NSViewRepresentable {
     @Binding var text: String
+    var onInlineEdit: (NSRange, String) -> Void = { _, _ in }
+    var requestCompletion: ((String, String, @escaping (String?) -> Void) -> Void)?
+    var autocompleteEnabled: Bool = false
 
     static let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
 
@@ -18,7 +84,7 @@ struct CodeEditor: NSViewRepresentable {
         container.widthTracksTextView = true
         layout.addTextContainer(container)
 
-        let tv = NSTextView(frame: .zero, textContainer: container)
+        let tv = VantaTextView(frame: .zero, textContainer: container)
         tv.delegate = context.coordinator
         tv.isRichText = false
         tv.allowsUndo = true
@@ -39,6 +105,8 @@ struct CodeEditor: NSViewRepresentable {
         tv.minSize = NSSize(width: 0, height: 0)
         tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         tv.string = text
+        tv.onCmdK = { range, sel in onInlineEdit(range, sel) }
+        tv.onTyped = { [weak coordinator = context.coordinator] in coordinator?.scheduleCompletion() }
         VantaSyntax.highlight(tv.textStorage!, font: Self.font)
 
         let scroll = NSScrollView()
@@ -52,13 +120,14 @@ struct CodeEditor: NSViewRepresentable {
         scroll.verticalRulerView = ruler
         scroll.hasVerticalRuler = true
         scroll.rulersVisible = true
+
         context.coordinator.textView = tv
         context.coordinator.ruler = ruler
-
         return scroll
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
+        context.coordinator.parent = self
         guard let tv = scroll.documentView as? NSTextView else { return }
         if tv.string != text {
             tv.string = text
@@ -68,9 +137,11 @@ struct CodeEditor: NSViewRepresentable {
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
-        let parent: CodeEditor
-        weak var textView: NSTextView?
+        var parent: CodeEditor
+        weak var textView: VantaTextView?
         weak var ruler: LineNumberRuler?
+        private var pending: DispatchWorkItem?
+
         init(_ p: CodeEditor) { parent = p }
 
         func textDidChange(_ notification: Notification) {
@@ -78,11 +149,38 @@ struct CodeEditor: NSViewRepresentable {
             parent.text = tv.string
             VantaSyntax.highlight(tv.textStorage!, font: CodeEditor.font)
             ruler?.needsDisplay = true
+            scheduleCompletion()
+        }
+
+        func scheduleCompletion() {
+            pending?.cancel()
+            guard parent.autocompleteEnabled, parent.requestCompletion != nil else { return }
+            let work = DispatchWorkItem { [weak self] in self?.fetchCompletion() }
+            pending = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: work)
+        }
+
+        private func fetchCompletion() {
+            guard let tv = textView, let req = parent.requestCompletion else { return }
+            let loc = tv.selectedRange().location
+            let full = tv.string as NSString
+            guard loc <= full.length else { return }
+            let prefix = full.substring(to: loc)
+            let suffix = full.substring(from: loc)
+            // only suggest when at end of a line with some context
+            guard !prefix.isEmpty, suffix.first.map({ $0 == "\n" }) ?? true else { return }
+            req(prefix, suffix) { [weak self] suggestion in
+                guard let self, let tv = self.textView else { return }
+                // only show if the cursor hasn't moved
+                if tv.selectedRange().location == loc, let s = suggestion, !s.isEmpty {
+                    tv.ghost = s
+                }
+            }
         }
     }
 }
 
-// A simple line-number gutter for the editor.
+// Line-number gutter.
 final class LineNumberRuler: NSRulerView {
     weak var textView: NSTextView?
 
@@ -90,18 +188,15 @@ final class LineNumberRuler: NSRulerView {
         self.textView = textView
         super.init(scrollView: textView.enclosingScrollView, orientation: .verticalRuler)
         clientView = textView
-        ruleThickness = 40
+        ruleThickness = 42
     }
 
     required init(coder: NSCoder) { fatalError("init(coder:) not used") }
 
     override func drawHashMarksAndLabels(in rect: NSRect) {
-        guard let tv = textView,
-              let layout = tv.layoutManager,
-              let container = tv.textContainer else { return }
-
+        guard let tv = textView, let layout = tv.layoutManager, let container = tv.textContainer else { return }
         Theme.nbg.setFill()
-        rect.fill()
+        bounds.fill()
 
         let text = tv.string as NSString
         let visible = tv.visibleRect
@@ -110,13 +205,12 @@ final class LineNumberRuler: NSRulerView {
             .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
             .foregroundColor: Theme.nline,
         ]
-
-        // Walk each line, draw its number at its glyph y-position.
         var lineNumber = 1
         var charIndex = 0
         let length = text.length
         while charIndex <= length {
-            let lineRange = text.lineRange(for: NSRange(location: min(charIndex, max(length - 1, 0)), length: 0))
+            let safe = min(charIndex, max(length - 1, 0))
+            let lineRange = text.lineRange(for: NSRange(location: safe, length: 0))
             let glyphRange = layout.glyphRange(forCharacterRange: lineRange, actualCharacterRange: nil)
             var lineRect = layout.boundingRect(forGlyphRange: glyphRange, in: container)
             lineRect.origin.y += inset

@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.9 — Vanta Studio goes Cursor-style
+- **⌘K inline edit** — select code (or just put the cursor on a line), press ⌘K,
+  describe the change in plain English, and Vee rewrites just that snippet. You
+  get a real line-by-line diff to **Accept (⏎)** or **Reject (Esc)** before
+  anything touches your file.
+- **Agent mode** — toggle "Agent" in the Vee panel and give it a goal. Vee writes
+  a complete program, **runs it natively**, reads the output, and if it hits an
+  error it fixes itself and runs again — looping (up to 4 rounds) until the code
+  runs clean. This is the native app's superpower: it actually executes Vanta, so
+  the AI can close the write→run→fix loop on its own.
+- **AI tab-autocomplete** — ghost-text suggestions appear as you type at the end
+  of a line; press **Tab** to accept, Esc to dismiss. Toggle it in AI Settings.
+
 ## 3.8 — native macOS app
 - **Vanta Studio.app** (`app/studio/`) — a real native macOS IDE in SwiftUI +
   AppKit (not a webview). Native code editor with Vanta syntax highlighting and

@@ -19,11 +19,25 @@ struct AIPanel: View {
                 }.frame(width: 32, height: 32)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Vee").font(.system(size: 14, weight: .bold))
-                    Text(model.settings.apiKey.isEmpty ? "add a key in ⚙ settings"
-                         : "\(model.settings.provider) · writes Vanta")
-                        .font(.system(size: 11)).foregroundColor(Theme.muted)
+                    Text(model.agentMode ? (model.agentStatus.isEmpty ? "agent · writes, runs & fixes" : model.agentStatus)
+                         : (model.settings.apiKey.isEmpty ? "add a key in ⚙ settings"
+                            : "\(model.settings.provider) · writes Vanta"))
+                        .font(.system(size: 11)).foregroundColor(model.agentMode ? Theme.accent : Theme.muted)
                 }
                 Spacer()
+                Button { model.agentMode.toggle() } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: model.agentMode ? "bolt.fill" : "bolt")
+                            .font(.system(size: 10, weight: .bold))
+                        Text("Agent").font(.system(size: 11.5, weight: .semibold))
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(RoundedRectangle(cornerRadius: 999)
+                        .fill(model.agentMode ? Theme.accentDim : Theme.panel)
+                        .overlay(RoundedRectangle(cornerRadius: 999).stroke(Theme.line, lineWidth: 1)))
+                    .foregroundColor(model.agentMode ? .white : Theme.muted)
+                }.buttonStyle(.plain)
+                    .help("Agent mode: Vee writes a program, runs it, reads the output, and fixes errors on its own.")
             }
             .padding(12)
             .overlay(Rectangle().fill(Theme.line).frame(height: 1), alignment: .bottom)
@@ -71,8 +85,8 @@ struct AIPanel: View {
                     .padding(9)
                     .background(RoundedRectangle(cornerRadius: 9).fill(Theme.panel)
                         .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.line, lineWidth: 1)))
-                    .onSubmit { model.askVee(model.aiInput) }
-                Button { model.askVee(model.aiInput) } label: {
+                    .onSubmit { send(model.aiInput) }
+                Button { send(model.aiInput) } label: {
                     Image(systemName: "arrow.up.circle.fill").font(.system(size: 24))
                 }.buttonStyle(.plain).foregroundColor(Theme.accent)
             }
@@ -81,6 +95,17 @@ struct AIPanel: View {
         }
         .background(Theme.bg)
         .foregroundColor(Theme.ink)
+    }
+
+    func send(_ text: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        if model.agentMode {
+            model.aiInput = ""
+            model.agentBuild(t)
+        } else {
+            model.askVee(t)
+        }
     }
 
     func fixPrompt() -> String {

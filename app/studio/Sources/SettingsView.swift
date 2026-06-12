@@ -44,6 +44,16 @@ struct SettingsView: View {
                 }
             }
 
+            Toggle(isOn: $model.settings.autocomplete) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("AI tab-autocomplete").font(.system(size: 13, weight: .semibold))
+                    Text("Ghost-text suggestions as you type — press Tab to accept.")
+                        .font(.system(size: 11)).foregroundColor(Theme.muted)
+                }
+            }
+            .toggleStyle(.switch)
+            .tint(Theme.accent)
+
             Text(note).font(.system(size: 11.5)).foregroundColor(Theme.muted)
 
             HStack {
