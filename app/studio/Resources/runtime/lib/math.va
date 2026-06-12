@@ -1,0 +1,60 @@
+# Standard library: math helpers.   import "math"
+
+to clamp(value, low, high)
+    if value is under low
+        give back low
+    end
+    if value is over high
+        give back high
+    end
+    give back value
+end
+
+to gcd(a, b)
+    while b is not 0
+        let temp be b
+        change b to a % b
+        change a to temp
+    end
+    give back a
+end
+
+to factorial(n)
+    let result be 1
+    let i be 2
+    while i is at most n
+        change result to result * i
+        change i to i + 1
+    end
+    give back result
+end
+
+to is_prime(n)
+    if n is under 2
+        give back no
+    end
+    let i be 2
+    while i * i is at most n
+        if n % i is 0
+            give back no
+        end
+        change i to i + 1
+    end
+    give back yes
+end
+
+to is_even(n)
+    give back n % 2 is 0
+end
+
+to to_radians(degrees)
+    give back degrees * pi / 180
+end
+
+to to_degrees(radians)
+    give back radians * 180 / pi
+end
+
+to hypotenuse(a, b)
+    give back sqrt(a * a + b * b)
+end

@@ -1,0 +1,34 @@
+# Standard library: randomness helpers.   import "random"
+# Built on the random(low, high) builtin (inclusive, whole numbers).
+
+to shuffle(items)
+    let result be items[0:length(items)]      # a copy, so the original is left alone
+    let i be length(result) - 1
+    while i is over 0
+        let j be random(0, i)
+        let temp be result[i]
+        change result[i] to result[j]
+        change result[j] to temp
+        decrease i by 1
+    end
+    give back result
+end
+
+to choice(items)
+    if length(items) is 0
+        fail("choice needs a non-empty list")
+    end
+    give back items[random(0, length(items) - 1)]
+end
+
+to sample(items, n)
+    give back shuffle(items)[0:n]
+end
+
+to roll(sides)
+    give back random(1, sides)
+end
+
+to chance(percent)
+    give back random(1, 100) is at most percent
+end

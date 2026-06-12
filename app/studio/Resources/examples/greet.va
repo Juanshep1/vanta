@@ -1,0 +1,11 @@
+# Asking the user questions
+ask "What is your name?" into name
+ask "How old are you?" into age
+
+say "Nice to meet you, " + name
+
+if age is at least 18
+    say "You are an adult."
+otherwise
+    say "You are still a minor."
+end

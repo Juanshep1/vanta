@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.8 — native macOS app
+- **Vanta Studio.app** (`app/studio/`) — a real native macOS IDE in SwiftUI +
+  AppKit (not a webview). Native code editor with Vanta syntax highlighting and
+  a line-number gutter; **runs Vanta natively via python3** (fast, real files,
+  streamed console, interactive `ask` input); file tabs/sidebar/open/save and
+  bundled examples; menus + shortcuts (Cmd-R/Cmd-S/…). Includes **Vee**, a
+  native AI panel (URLSession, so no browser CORS) supporting OpenRouter,
+  Anthropic, Ollama Cloud, and NVIDIA, with one-click Apply of generated code.
+  Build with XcodeGen (`cd app/studio && xcodegen generate`).
+
 ## 3.7.1
 - Vanta Studio: Vee gained two more providers — **Ollama Cloud** and
   **NVIDIA NIM** (OpenAI-compatible), with a live **Ollama Cloud model picker**

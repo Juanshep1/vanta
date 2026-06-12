@@ -1,0 +1,51 @@
+# Standard library: list helpers.   import "lists"
+
+to add_two(a, b)
+    give back a + b
+end
+
+to sum(numbers)
+    give back reduce(add_two, numbers, 0)
+end
+
+to average(numbers)
+    if length(numbers) is 0
+        give back 0
+    end
+    give back sum(numbers) / length(numbers)
+end
+
+to unique(items)
+    let seen be []
+    for each item in items
+        if not contains(seen, item)
+            add item to seen
+        end
+    end
+    give back seen
+end
+
+to take(items, n)
+    give back slice(items, 0, min(n, length(items)))
+end
+
+to flatten(list_of_lists)
+    let result be []
+    for each inner in list_of_lists
+        for each item in inner
+            add item to result
+        end
+    end
+    give back result
+end
+
+to zip_with(fn, left, right)
+    let result be []
+    let count be min(length(left), length(right))
+    let i be 0
+    while i is under count
+        add fn(left[i], right[i]) to result
+        change i to i + 1
+    end
+    give back result
+end

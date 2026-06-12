@@ -1,0 +1,17 @@
+# Maps: look things up by a name (key) instead of a position
+
+let person be { "name": "Juan", "age": 25, "city": "Miami" }
+
+say person["name"] + " is " + person["age"] + " years old."
+
+# Change a value and add a new key
+change person at "age" to 26
+change person at "job" to "builder"
+
+say "All the keys:"
+for each key in person
+    say "- " + key + ": " + person[key]
+end
+
+say "Has a name? " + contains(person, "name")
+say "Has a pet?  " + contains(person, "pet")

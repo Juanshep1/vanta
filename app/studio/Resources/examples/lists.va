@@ -1,0 +1,30 @@
+# Lists: an ordered collection of values
+
+let fruits be ["apple", "banana", "cherry"]
+say "I have " + length(fruits) + " fruits."
+say "The first is " + first(fruits)
+say "The one at position 1 is " + fruits[1]
+
+# Add to a list and change an item
+add "date" to fruits
+change fruits at 0 to "apricot"
+say fruits
+
+# Loop over every item
+say "My shopping list:"
+for each fruit in fruits
+    say "- " + fruit
+end
+
+# range() makes a list of numbers; build a total
+let total be 0
+for each n in range(1, 6)
+    change total to total + n
+end
+say "1+2+3+4+5 = " + total
+
+# Logic with and / or / not
+let age be 30
+if age is over 18 and age is under 65
+    say "Working age."
+end

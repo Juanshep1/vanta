@@ -1,0 +1,31 @@
+# Standard library: text helpers.   import "text"
+
+to capitalize(word)
+    if length(word) is 0
+        give back word
+    end
+    give back uppercase(slice(word, 0, 1)) + slice(word, 1, length(word))
+end
+
+to title_case(sentence)
+    give back join([capitalize(w) for each w in split(sentence, " ")], " ")
+end
+
+to repeat_text(piece, count)
+    let result be ""
+    repeat count times
+        change result to result + piece
+    end
+    give back result
+end
+
+to count_text(haystack, needle)
+    if length(needle) is 0
+        give back 0
+    end
+    give back length(split(haystack, needle)) - 1
+end
+
+to is_blank(value)
+    give back length(trim(value)) is 0
+end

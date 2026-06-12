@@ -1,0 +1,38 @@
+# XcodeGen spec for the native Vanta Studio macOS app.
+#   brew install xcodegen   (if needed)
+#   cd app/studio && xcodegen generate && open VantaStudio.xcodeproj
+# then press Run (Cmd-R).
+
+name: VantaStudio
+options:
+  bundleIdPrefix: com.juanshep
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+targets:
+  VantaStudio:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+      - path: Resources/runtime
+        type: folder
+      - path: Resources/examples
+        type: folder
+      - path: Assets.xcassets
+        optional: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.juanshep.vantastudio
+        PRODUCT_NAME: Vanta Studio
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        INFOPLIST_FILE: Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        ENABLE_HARDENED_RUNTIME: NO
+        CODE_SIGN_STYLE: Automatic
+        COMBINE_HIDPI_IMAGES: YES
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
