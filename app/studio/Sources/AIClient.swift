@@ -132,10 +132,32 @@ enum AIClient {
         let (data, _) = try await URLSession.shared.data(for: req)
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         if let err = json?["error"] as? [String: Any], let m = err["message"] as? String { throw AIError.message(m) }
-        if let choices = json?["choices"] as? [[String: Any]],
-           let msg = choices.first?["message"] as? [String: Any],
-           let content = msg["content"] as? String { return content }
+        if let text = messageText(json) { return text }
         throw AIError.message("empty response")
+    }
+
+    // Pull the assistant's text out of an OpenAI-style reply, tolerating the
+    // shapes capable/reasoning models actually use: content as a string, content
+    // as an array of parts, or (for reasoning models like gpt-oss / deepseek)
+    // the text sitting in a reasoning field when content came back empty.
+    private static func messageText(_ json: [String: Any]?) -> String? {
+        guard let choices = json?["choices"] as? [[String: Any]],
+              let msg = choices.first?["message"] as? [String: Any] else { return nil }
+        if let s = msg["content"] as? String,
+           !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return s
+        }
+        if let parts = msg["content"] as? [[String: Any]] {
+            let joined = parts.compactMap { $0["text"] as? String }.joined()
+            if !joined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return joined }
+        }
+        for key in ["reasoning_content", "reasoning"] {
+            if let r = msg[key] as? String,
+               !r.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return r
+            }
+        }
+        return nil
     }
 
     private static func anthropic(system: String, history: [[String: String]], settings: AISettings, maxTokens: Int) async throws -> String {

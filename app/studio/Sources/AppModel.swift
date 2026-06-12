@@ -396,7 +396,7 @@ final class AppModel: ObservableObject {
                 let reply: String
                 do {
                     reply = try await AIClient.chat(system: AISystemPrompt.agentSystem,
-                                                    history: history, settings: s, maxTokens: 4096)
+                                                    history: history, settings: s, maxTokens: 8000)
                 } catch {
                     await MainActor.run {
                         self.aiMessages.append(AIMessage(role: "assistant", text: "Error: \(error.localizedDescription)"))
@@ -405,7 +405,7 @@ final class AppModel: ObservableObject {
                     return
                 }
                 history.append(["role": "assistant", "content": reply])
-                guard let code = Self.firstCodeBlock(reply) else {
+                guard let code = Self.extractProgram(from: reply) else {
                     finalNote = reply
                     break
                 }
@@ -477,7 +477,7 @@ final class AppModel: ObservableObject {
                 let reply: String
                 do {
                     reply = try await AIClient.chat(system: AISystemPrompt.agentSystem,
-                                                    history: history, settings: s, maxTokens: 4096)
+                                                    history: history, settings: s, maxTokens: 8000)
                 } catch {
                     await MainActor.run {
                         self.aiMessages.append(AIMessage(role: "assistant", text: "Error: \(error.localizedDescription)"))
@@ -490,7 +490,7 @@ final class AppModel: ObservableObject {
                 // Pull out the candidate program and make sure it's actually a
                 // fix — weak models sometimes just echo the error message back.
                 // Never apply that; ask again instead of wrecking the file.
-                let candidate = Self.firstCodeBlock(reply) ?? AIClient.stripFences(reply)
+                let candidate = Self.extractProgram(from: reply) ?? ""
                 if !Self.isPlausibleProgram(candidate, errorText: lastError) {
                     history.append(["role": "user", "content": "That was not a corrected program — do NOT repeat the error message. Return ONLY the complete, fixed Vanta file inside a ```va code block```, nothing else."])
                     continue
@@ -563,15 +563,70 @@ final class AppModel: ObservableObject {
         return true
     }
 
-    static func firstCodeBlock(_ text: String) -> String? {
-        guard let open = text.range(of: "```") else { return nil }
-        // skip the language tag / file attribute on the opening fence line
-        let afterOpen = text[open.upperBound...]
-        guard let firstNL = afterOpen.firstIndex(of: "\n") else { return nil }
-        let bodyStart = afterOpen.index(after: firstNL)
-        let rest = text[bodyStart...]
-        guard let close = rest.range(of: "```") else { return nil }
-        return String(rest[..<close.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Pull a complete Vanta program out of an assistant reply, robustly enough
+    /// that any capable model works — including reasoning models (gpt-oss,
+    /// deepseek-r1, qwen-thinking) that wrap their answer in <think> blocks or
+    /// OpenAI "harmony" channel tags, and models that skip code fences entirely.
+    static func extractProgram(from reply: String) -> String? {
+        var text = reply
+
+        // 1. drop reasoning the model wasn't supposed to send as the answer
+        text = stripBetween(text, "<think>", "</think>")
+        text = stripBetween(text, "<reasoning>", "</reasoning>")
+
+        // 2. gpt-oss harmony: keep only the final-answer channel, then remove
+        //    any leftover channel/control tokens
+        if let r = text.range(of: "<|channel|>final<|message|>") {
+            text = String(text[r.upperBound...])
+        }
+        for tag in ["<|channel|>analysis<|message|>", "<|channel|>final<|message|>",
+                    "<|channel|>analysis", "<|channel|>final", "<|channel|>",
+                    "<|start|>assistant", "<|start|>", "<|message|>",
+                    "<|end|>", "<|return|>"] {
+            text = text.replacingOccurrences(of: tag, with: "")
+        }
+
+        // 3. prefer the largest fenced code block (the full file, vs a tiny
+        //    inline snippet the model might also mention)
+        let blocks = codeBlocks(in: text)
+        if let best = blocks.max(by: { $0.count < $1.count }) {
+            let t = best.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty { return t }
+        }
+
+        // 4. no fences at all — use the cleaned text as-is
+        let whole = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return whole.isEmpty ? nil : whole
+    }
+
+    /// Every fenced ```…``` block in the text, with the opening language tag
+    /// line (```va, ```vanta, ```python …) stripped.
+    static func codeBlocks(in text: String) -> [String] {
+        let parts = text.components(separatedBy: "```")
+        guard parts.count >= 3 else { return [] }
+        var blocks: [String] = []
+        var i = 1
+        while i < parts.count {                 // odd indices are inside fences
+            var block = parts[i]
+            if let nl = block.firstIndex(of: "\n") {
+                let firstLine = block[block.startIndex..<nl].trimmingCharacters(in: .whitespaces)
+                if !firstLine.contains(" ") && firstLine.count < 14 {   // a language tag
+                    block = String(block[block.index(after: nl)...])
+                }
+            }
+            blocks.append(block)
+            i += 2
+        }
+        return blocks
+    }
+
+    static func stripBetween(_ text: String, _ open: String, _ close: String) -> String {
+        var t = text
+        while let o = t.range(of: open),
+              let c = t.range(of: close, range: o.upperBound..<t.endIndex) {
+            t.removeSubrange(o.lowerBound..<c.upperBound)
+        }
+        return t
     }
 
     // MARK: AI model catalog
