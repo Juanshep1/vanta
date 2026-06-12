@@ -130,9 +130,46 @@ struct CodeEditor: NSViewRepresentable {
         context.coordinator.parent = self
         guard let tv = scroll.documentView as? NSTextView else { return }
         if tv.string != text {
-            tv.string = text
+            // Replace ONLY the characters that actually changed, rather than
+            // swapping the whole document. That keeps the rest of the file (and
+            // the scroll position) put, so applying a fix edits just the exact
+            // lines in place instead of feeling like a fresh file.
+            context.coordinator.applyingProgrammatic = true
+            Self.applyMinimalEdit(tv, to: text)
+            context.coordinator.applyingProgrammatic = false
             VantaSyntax.highlight(tv.textStorage!, font: Self.font)
             context.coordinator.ruler?.needsDisplay = true
+        }
+    }
+
+    /// Diff old vs new and replace only the differing middle span (registered
+    /// with the undo manager, so ⌘Z reverts the fix as one edit).
+    static func applyMinimalEdit(_ tv: NSTextView, to newText: String) {
+        let oldNS = tv.string as NSString
+        let newNS = newText as NSString
+        let oldLen = oldNS.length, newLen = newNS.length
+
+        var p = 0
+        let maxP = min(oldLen, newLen)
+        while p < maxP && oldNS.character(at: p) == newNS.character(at: p) { p += 1 }
+
+        var s = 0
+        let maxS = min(oldLen, newLen) - p
+        while s < maxS && oldNS.character(at: oldLen - 1 - s) == newNS.character(at: newLen - 1 - s) { s += 1 }
+
+        // don't cut through a UTF-16 surrogate pair (emoji etc.)
+        func isLowSurrogate(_ u: unichar) -> Bool { u >= 0xDC00 && u <= 0xDFFF }
+        if p > 0, p < oldLen, isLowSurrogate(oldNS.character(at: p)) { p -= 1 }
+        if s > 0, isLowSurrogate(oldNS.character(at: oldLen - s)) { s -= 1 }
+
+        let range = NSRange(location: p, length: oldLen - p - s)
+        let replacement = newNS.substring(with: NSRange(location: p, length: newLen - p - s))
+
+        if tv.shouldChangeText(in: range, replacementString: replacement) {
+            tv.textStorage?.replaceCharacters(in: range, with: replacement)
+            tv.didChangeText()
+        } else {
+            tv.textStorage?.replaceCharacters(in: range, with: replacement)
         }
     }
 
@@ -140,11 +177,16 @@ struct CodeEditor: NSViewRepresentable {
         var parent: CodeEditor
         weak var textView: VantaTextView?
         weak var ruler: LineNumberRuler?
+        var applyingProgrammatic = false      // true while updateNSView is editing
         private var pending: DispatchWorkItem?
 
         init(_ p: CodeEditor) { parent = p }
 
         func textDidChange(_ notification: Notification) {
+            // Ignore the change notification from our own minimal-edit apply —
+            // the model already holds this text, and we don't want to autocomplete
+            // off a programmatic fix.
+            if applyingProgrammatic { return }
             guard let tv = notification.object as? NSTextView else { return }
             parent.text = tv.string
             VantaSyntax.highlight(tv.textStorage!, font: CodeEditor.font)
