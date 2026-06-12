@@ -322,6 +322,7 @@ button.primary:hover:not(:disabled) { filter: brightness(1.15); }
   backdrop-filter: blur(4px);
   display: grid; place-items: center;
 }
+.modal-back[hidden] { display: none !important; }
 .modal {
   width: min(440px, 92vw);
   background: var(--panel);
