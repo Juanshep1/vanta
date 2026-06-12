@@ -43,6 +43,51 @@ const getAiModel = () => {
   return localStorage.getItem(p.modelLS) || p.defaultModel;
 };
 
+/* ------- OpenRouter live model catalog (every model, free ones marked) ------- */
+
+const LS_OR_CATALOG = "vanta-studio-or-models";
+let orCatalog = null;   // [{id, free}]
+
+async function loadOpenRouterModels() {
+  if (orCatalog) return orCatalog;
+  try {
+    const cached = JSON.parse(localStorage.getItem(LS_OR_CATALOG) || "null");
+    if (cached && Date.now() - cached.at < 24 * 3600 * 1000 && cached.models.length) {
+      orCatalog = cached.models;
+      return orCatalog;
+    }
+  } catch (e) { /* refetch below */ }
+  const resp = await fetch("https://openrouter.ai/api/v1/models");
+  const data = await resp.json();
+  const isFree = (m) => m.id.endsWith(":free") ||
+    (m.pricing && parseFloat(m.pricing.prompt || 1) === 0 &&
+                  parseFloat(m.pricing.completion || 1) === 0);
+  orCatalog = (data.data || [])
+    .map((m) => ({ id: m.id, free: !!isFree(m) }))
+    .sort((a, b) => (b.free - a.free) || a.id.localeCompare(b.id));   // free first
+  try {
+    localStorage.setItem(LS_OR_CATALOG, JSON.stringify({ at: Date.now(), models: orCatalog }));
+  } catch (e) { /* storage full is fine */ }
+  return orCatalog;
+}
+
+function renderOrModelList() {
+  const list = $("modelList");
+  list.innerHTML = "";
+  const freeOnly = $("freeOnly").checked;
+  const models = (orCatalog || []).filter((m) => !freeOnly || m.free);
+  for (const m of models) {
+    const o = document.createElement("option");
+    o.value = m.id;
+    if (m.free) o.label = "free";
+    list.appendChild(o);
+  }
+  const freeCount = (orCatalog || []).filter((m) => m.free).length;
+  $("providerNote").textContent = orCatalog
+    ? `${orCatalog.length} models loaded live from openrouter.ai (${freeCount} free, listed first). Type in the model box to search.`
+    : PROVIDERS.openrouter.note;
+}
+
 let files = {};            // name -> content
 let openTabs = [];         // [name]
 let active = null;         // current file name
@@ -904,12 +949,19 @@ function init() {
     $("apiKey").placeholder = p.placeholder;
     $("aiModel").value = localStorage.getItem(p.modelLS) || p.defaultModel;
     $("providerNote").textContent = p.note;
+    $("freeRow").hidden = provider !== "openrouter";
     const list = $("modelList");
     list.innerHTML = "";
-    for (const m of p.models) {
+    for (const m of p.models) {           // static fallback, shown immediately
       const o = document.createElement("option");
       o.value = m;
       list.appendChild(o);
+    }
+    if (provider === "openrouter") {
+      $("providerNote").textContent = "Loading the live model catalog…";
+      loadOpenRouterModels()
+        .then(renderOrModelList)
+        .catch(() => { $("providerNote").textContent = p.note + " (couldn't load the live catalog — using suggestions)"; });
     }
   };
   refreshAiMode();
@@ -919,6 +971,7 @@ function init() {
     $("settingsModal").hidden = false;
   };
   $("aiProvider").onchange = () => fillProviderFields($("aiProvider").value);
+  $("freeOnly").onchange = renderOrModelList;
   $("settingsSave").onclick = () => {
     const provider = $("aiProvider").value;
     const p = PROVIDERS[provider];
