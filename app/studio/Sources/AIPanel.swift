@@ -45,7 +45,10 @@ struct AIPanel: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 7) {
                     ForEach(chips, id: \.0) { chip in
-                        Button { model.askVee(chip.1 == "__FIX__" ? fixPrompt() : chip.1) } label: {
+                        Button {
+                            if chip.1 == "__FIX__" { model.fixWithVee() }
+                            else { send(chip.1) }
+                        } label: {
                             Text(chip.0).font(.system(size: 11.5, weight: .semibold))
                                 .padding(.horizontal, 11).padding(.vertical, 6)
                                 .background(RoundedRectangle(cornerRadius: 999).fill(Theme.panel)

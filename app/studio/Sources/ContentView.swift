@@ -292,9 +292,26 @@ struct ConsoleArea: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 10) {
                 Text("CONSOLE").font(.system(size: 10.5, weight: .bold)).tracking(1.5).foregroundColor(Theme.muted)
                 Spacer()
+                if model.aiBusy && !model.agentStatus.isEmpty {
+                    HStack(spacing: 5) {
+                        ProgressView().controlSize(.small)
+                        Text(model.agentStatus).font(.system(size: 11)).foregroundColor(Theme.accent)
+                    }
+                } else if model.consoleHasError && !model.isRunning {
+                    Button { model.fixWithVee() } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "sparkles").font(.system(size: 10, weight: .bold))
+                            Text("Fix with Vee").font(.system(size: 11.5, weight: .semibold))
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(RoundedRectangle(cornerRadius: 7).fill(Theme.accentDim))
+                        .foregroundColor(.white)
+                    }.buttonStyle(.plain)
+                        .help("Vee reads the error, fixes your code, applies it, and re-runs to confirm")
+                }
                 Button { model.console = "" } label: {
                     Text("clear").font(.system(size: 11))
                 }.buttonStyle(.plain).foregroundColor(Theme.muted)
