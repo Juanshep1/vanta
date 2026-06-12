@@ -28,7 +28,7 @@ import math
 import subprocess
 import random
 
-VERSION = "3.3"
+VERSION = "4.0"
 
 # Command-line arguments passed to a Vanta program (after the script name).
 PROGRAM_ARGS = []
@@ -2164,6 +2164,178 @@ def b_clock(args):
     return time.strftime("%H:%M:%S")
 
 
+# ---- the web: HTTP client, HTTP server, and friends ----------------------
+# These make Vanta a real full-stack language: talk to APIs, and serve web
+# pages / JSON like Node, Flask, or a Go/Rust server would. Imports are lazy
+# so loading vanta.py never needs a network stack (e.g. in the browser).
+
+def _headers_map(value, name):
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise VantaError(f"{name}'s headers must be a map")
+    return {display(k): display(v) for k, v in value.items()}
+
+
+def _http_request(method, url, body, headers):
+    import urllib.request
+    import urllib.error
+    hdrs = _headers_map(headers, "http")
+    data = None
+    if body is not None and body != "":
+        if isinstance(body, (dict, list)):
+            data = json.dumps(body).encode("utf-8")
+            hdrs.setdefault("Content-Type", "application/json")
+        else:
+            data = display(body).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            text = resp.read().decode("utf-8", "replace")
+            return {"status": resp.status, "body": text,
+                    "headers": {k: v for k, v in resp.headers.items()}}
+    except urllib.error.HTTPError as e:
+        text = e.read().decode("utf-8", "replace")
+        return {"status": e.code, "body": text,
+                "headers": {k: v for k, v in (e.headers or {}).items()}}
+    except urllib.error.URLError as e:
+        raise VantaError(f"could not reach {url}: {getattr(e, 'reason', e)}")
+
+
+def b_http_get(args):
+    if len(args) not in (1, 2):
+        raise VantaError("http_get expects a url (and an optional headers map)")
+    return _http_request("GET", display(args[0]), None,
+                         args[1] if len(args) == 2 else None)
+
+
+def b_http_post(args):
+    if len(args) not in (2, 3):
+        raise VantaError("http_post expects a url and a body "
+                         "(and an optional headers map)")
+    return _http_request("POST", display(args[0]), args[1],
+                         args[2] if len(args) == 3 else None)
+
+
+def b_http_request(args):
+    if len(args) not in (2, 3, 4):
+        raise VantaError("http_request expects a method, a url, an optional "
+                         "body, and an optional headers map")
+    return _http_request(display(args[0]).upper(), display(args[1]),
+                         args[2] if len(args) >= 3 else None,
+                         args[3] if len(args) == 4 else None)
+
+
+def b_serve(args):
+    if len(args) not in (1, 2):
+        raise VantaError("serve expects a port and a handler function "
+                         "(or just a handler — port defaults to 8080)")
+    if len(args) == 1:
+        port, handler = 8080, args[0]
+    else:
+        port, handler = int_arg(args[0], "serve"), args[1]
+    if not isinstance(handler, (Function, Builtin, BoundMethod)):
+        raise VantaError("serve's handler must be a function that takes a "
+                         "request map and gives back a page (text or a map)")
+
+    import urllib.parse
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+
+    class VantaHandler(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _reply(self, status, text, ctype, extra):
+            blob = text.encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(blob)))
+            for k, v in extra.items():
+                self.send_header(k, v)
+            self.end_headers()
+            self.wfile.write(blob)
+
+        def _handle(self, method):
+            parsed = urllib.parse.urlparse(self.path)
+            query = {k: (v[0] if len(v) == 1 else v)
+                     for k, v in urllib.parse.parse_qs(parsed.query).items()}
+            length = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(length).decode("utf-8", "replace") if length else ""
+            request = {"method": method, "path": parsed.path, "query": query,
+                       "headers": {k: v for k, v in self.headers.items()},
+                       "body": body}
+            try:
+                result = apply_callable(handler, [request])
+            except VantaError as e:
+                self._reply(500, f"Vanta error: {e}", "text/plain; charset=utf-8", {})
+                return
+            status, ctype, extra = 200, "text/html; charset=utf-8", {}
+            if isinstance(result, dict):
+                status = int(result.get("status", 200))
+                raw = result.get("body", "")
+                if isinstance(raw, (dict, list)):
+                    text = json.dumps(raw)
+                    ctype = "application/json"
+                else:
+                    text = display(raw)
+                if "type" in result or "content_type" in result:
+                    ctype = display(result.get("type", result.get("content_type")))
+                hh = result.get("headers")
+                if isinstance(hh, dict):
+                    extra = {display(k): display(v) for k, v in hh.items()}
+            else:
+                text = display(result)
+            self._reply(status, text, ctype, extra)
+
+        def do_GET(self):     self._handle("GET")
+        def do_POST(self):    self._handle("POST")
+        def do_PUT(self):     self._handle("PUT")
+        def do_DELETE(self):  self._handle("DELETE")
+        def do_PATCH(self):   self._handle("PATCH")
+        def do_HEAD(self):    self._handle("HEAD")
+
+    server = HTTPServer(("", port), VantaHandler)
+    print(f"Vanta server running on http://localhost:{port}  "
+          f"(press Stop / Ctrl-C to quit)")
+    sys.stdout.flush()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+        print("Server stopped.")
+    return None
+
+
+def b_sleep(args):
+    _need(args, 1, "sleep")
+    secs = args[0]
+    if isinstance(secs, bool) or not isinstance(secs, (int, float)):
+        raise VantaError("sleep expects a number of seconds")
+    time.sleep(secs)
+    return None
+
+
+def b_url_encode(args):
+    _need(args, 1, "url_encode")
+    import urllib.parse
+    return urllib.parse.quote(display(args[0]), safe="")
+
+
+def b_url_decode(args):
+    _need(args, 1, "url_decode")
+    import urllib.parse
+    return urllib.parse.unquote(display(args[0]))
+
+
+def b_html_escape(args):
+    _need(args, 1, "html_escape")
+    s = display(args[0])
+    return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+             .replace('"', "&quot;").replace("'", "&#39;"))
+
+
 BUILTINS = {
     # conversions & inspection
     "length": b_length, "text": b_text, "number": b_number,
@@ -2204,6 +2376,11 @@ BUILTINS = {
     # bytes & bitwise
     "read_bytes": b_read_bytes, "band": b_band, "bor": b_bor, "bxor": b_bxor,
     "bnot": b_bnot, "shift_left": b_shift_left, "shift_right": b_shift_right,
+    # the web: HTTP client, HTTP server, and helpers
+    "http_get": b_http_get, "http_post": b_http_post,
+    "http_request": b_http_request, "serve": b_serve, "sleep": b_sleep,
+    "url_encode": b_url_encode, "url_decode": b_url_decode,
+    "html_escape": b_html_escape,
 }
 
 # A first-class value for every builtin, so they can be passed to map/keep/etc.

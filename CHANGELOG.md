@@ -1,5 +1,29 @@
 # Changelog
 
+## 4.0 — Vanta goes full-stack (the web)
+Vanta can now build the things Python, JavaScript, or Go can — real web
+servers and API clients, not just console scripts. New builtins:
+- **`serve(port, handler)`** — run a real HTTP server. The handler is an
+  ordinary Vanta function that takes a request map
+  (`{"method","path","query","headers","body"}`) and gives back either an HTML
+  string or a map `{"status","body","type","headers"}`. Return a map/list as
+  the body and it's sent as JSON automatically. You route by checking
+  `req["path"]`. Runs until you stop it.
+- **`http_get`, `http_post`, `http_request`** — call any API/URL. You get back
+  `{"status","body","headers"}`; pass a map/list body and it's sent as JSON.
+- **`url_encode` / `url_decode`**, **`html_escape`** (escape user input before
+  putting it in a page), and **`sleep(seconds)`**.
+- In **Vanta Studio** (native app), Vee now knows all of this — ask it (or
+  Agent mode) to "build a web page" or "make a JSON API" and press Run; the
+  built-in console shows the `http://localhost:…` address. Agent mode treats a
+  server that stays up as success instead of waiting forever.
+- The interpreter version string is now `4.0` (it had lagged at `3.3`).
+- The native app's sidebar drops the bundled "Examples" list — every Vanta
+  feature works out of the box, so you start from a clean file.
+
+Tested end to end: a Vanta web server serving HTML + JSON, hit by Vanta's own
+`http_get` (`tools/server_headless.py`, in the test suite — now 34 checks).
+
 ## 3.9 — Vanta Studio goes Cursor-style
 - **⌘K inline edit** — select code (or just put the cursor on a line), press ⌘K,
   describe the change in plain English, and Vee rewrites just that snippet. You

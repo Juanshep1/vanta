@@ -97,17 +97,18 @@ struct Sidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            label("FILES")
-            ForEach(model.files) { f in
-                row(name: f.name + (f.dirty ? " •" : ""), active: f.id == model.activeID)
-                    .onTapGesture { model.select(f.id) }
+            HStack {
+                label("FILES")
+                Spacer()
+                Button { model.newFile() } label: {
+                    Image(systemName: "plus").font(.system(size: 11, weight: .bold))
+                }.buttonStyle(.plain).foregroundColor(Theme.muted).padding(.trailing, 12)
             }
-            label("EXAMPLES").padding(.top, 14)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(model.examples, id: \.self) { url in
-                        row(name: url.lastPathComponent, active: false)
-                            .onTapGesture { model.loadExample(url) }
+                    ForEach(model.files) { f in
+                        row(name: f.name + (f.dirty ? " •" : ""), active: f.id == model.activeID)
+                            .onTapGesture { model.select(f.id) }
                     }
                 }
             }

@@ -309,6 +309,38 @@ say read_file("note.txt")
 say run("ls -la")            # run a shell command, get its output
 ```
 
+### The web — servers and APIs
+Vanta is full-stack. A web server is just a function that takes a request and
+gives back a page (a string is sent as HTML; a map/list body is sent as JSON):
+
+```
+to handle(req)
+    let path be req["path"]
+    if path is "/"
+        give back "<h1>Hello from Vanta</h1>"
+    end
+    if path is "/api"
+        give back {"status": 200, "body": {"ok": yes}, "type": "application/json"}
+    end
+    give back {"status": 404, "body": "Not found"}
+end
+
+serve(8080, handle)          # now open http://localhost:8080
+```
+
+And you can call any API with `http_get` / `http_post` (a map/list body is sent
+as JSON; you get back `{"status", "body", "headers"}`):
+
+```
+let res be http_get("https://api.github.com")
+let code be res["status"]    # bind first — interpolation can't hold quotes
+say "GitHub says {code}"
+let data be from_json(res["body"])
+```
+
+> One gotcha: string interpolation `"{...}"` can't contain double quotes, so
+> bind `let p be req["path"]` first, then say `"{p}"`.
+
 ### Modules and the standard library
 `import` runs another file's definitions into your program. It looks for the
 file as given, then in Vanta's bundled library (`lib/`), then in installed
@@ -341,11 +373,12 @@ higher:   map keep reduce each count_where find_where sort_by
 modules:  import "math" / "lists" / "text" / "random" (the bundled lib/)
 types:    type_of is_a is_number is_text is_list is_map is_function is_nothing
 regex:    matches find_all replace_all
-time:     now today clock
+time:     now today clock sleep
 errors:   fail assert
 constants: pi e
 system:   read_file write_file run shell arguments env make_dir remove_path
           list_dir path_exists copy_path to_json from_json interpreter
+web:      serve http_get http_post http_request url_encode url_decode html_escape
 ```
 
 ## How it works

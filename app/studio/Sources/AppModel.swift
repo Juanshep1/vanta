@@ -49,20 +49,22 @@ final class AppModel: ObservableObject {
         loadSettings()
         let starter = """
         # Welcome to Vanta Studio — the native Mac IDE for Vanta.
-        # This runs your code natively (real python3, not WebAssembly) — fast.
-        # Press the Run button or Cmd-R.
+        # Runs natively (real python3, not WebAssembly), and Vanta is full-stack:
+        # console scripts, JSON APIs, and real web servers. Press Run / Cmd-R.
 
         say "Hello from a native Mac app!"
 
         let squares be [n * n for each n in range(1, 8)]
         say "Squares: {to_json(squares)}"
 
-        to greet(who, greeting be "Hey")
-            give back "{greeting}, {who}!"
-        end
-        say greet("Vanta")
+        # Want a web page? Uncomment this, press Run, open http://localhost:8080
+        # to home(req)
+        #     give back "<h1>Served by Vanta</h1><p>It's a real web server.</p>"
+        # end
+        # serve(8080, home)
 
-        # Ask Vee (the panel on the right) to write something for you.
+        # Or just ask Vee (the panel on the right): turn on Agent and say
+        # "build me a web page" — it writes it, runs it, and fixes its own errors.
         """
         files = [VFile(url: nil, name: "welcome.va", content: starter)]
         activeID = files.first?.id
@@ -325,15 +327,27 @@ final class AppModel: ObservableObject {
     // MARK: Agent (build → run → self-fix loop)
 
     /// Run the given source and return everything it printed (stdout + stderr).
-    func runAndCapture(_ code: String) async -> String {
+    /// A long-running program (e.g. a web server) is stopped after `timeout`
+    /// seconds and whatever it printed so far is returned — so the agent can
+    /// treat "it's still up and listening" as success rather than hanging.
+    func runAndCapture(_ code: String, timeout: Double = 18) async -> String {
         guard let vpy = vantaPyURL else { return "Bundled vanta.py not found." }
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("vanta-agent-run.va")
         try? code.write(to: tmp, atomically: true, encoding: .utf8)
         return await withCheckedContinuation { cont in
             var buffer = ""
+            var done = false
+            let finish: (String) -> Void = { out in
+                if done { return }; done = true; cont.resume(returning: out)
+            }
             self.runner.run(vantaPy: vpy, sourceFile: tmp,
                 onOutput: { s in buffer += s },
-                onFinish: { _ in cont.resume(returning: buffer) })
+                onFinish: { _ in finish(buffer) })
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
+                guard !done else { return }
+                self.runner.stop()
+                finish(buffer + "\n[still running after \(Int(timeout))s — looks like a server or long-running program; left it for you to Run.]")
+            }
         }
     }
 
