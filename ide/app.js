@@ -7,8 +7,41 @@
 /* ================================ state ================================ */
 
 const LS_KEY = "vanta-studio-project";
-const LS_API = "vanta-studio-apikey";
-const LS_MODEL = "vanta-studio-model";
+const LS_PROVIDER = "vanta-studio-provider";        // "anthropic" | "openrouter"
+const LS_API = "vanta-studio-apikey";               // anthropic key
+const LS_MODEL = "vanta-studio-model";              // anthropic model
+const LS_API_OR = "vanta-studio-apikey-or";         // openrouter key
+const LS_MODEL_OR = "vanta-studio-model-or";        // openrouter model
+
+const PROVIDERS = {
+  anthropic: {
+    label: "Claude",
+    keyLS: LS_API, modelLS: LS_MODEL,
+    defaultModel: "claude-fable-5",
+    placeholder: "sk-ant-...",
+    note: "Get a key at console.anthropic.com.",
+    models: ["claude-fable-5", "claude-opus-4-8", "claude-sonnet-4-6",
+             "claude-haiku-4-5-20251001"],
+  },
+  openrouter: {
+    label: "OpenRouter",
+    keyLS: LS_API_OR, modelLS: LS_MODEL_OR,
+    defaultModel: "anthropic/claude-sonnet-4.6",
+    placeholder: "sk-or-...",
+    note: "Get a key at openrouter.ai/keys — any model slug from openrouter.ai/models works.",
+    models: ["anthropic/claude-sonnet-4.6", "anthropic/claude-opus-4.8",
+             "openai/gpt-5", "openai/gpt-5-mini", "google/gemini-2.5-pro",
+             "google/gemini-2.5-flash", "deepseek/deepseek-chat",
+             "meta-llama/llama-4-maverick"],
+  },
+};
+
+const getProvider = () => localStorage.getItem(LS_PROVIDER) || "anthropic";
+const getAiKey = () => localStorage.getItem(PROVIDERS[getProvider()].keyLS) || "";
+const getAiModel = () => {
+  const p = PROVIDERS[getProvider()];
+  return localStorage.getItem(p.modelLS) || p.defaultModel;
+};
 
 let files = {};            // name -> content
 let openTabs = [];         // [name]
@@ -600,42 +633,68 @@ async function askVee(prompt) {
   }
   addMsg("user", prompt);
   aiHistory.push({ role: "user", content: prompt });
-  const key = localStorage.getItem(LS_API);
+  const key = getAiKey();
   if (!key) { offlineVee(prompt); return; }
 
   aiBusy = true;
   const thinking = addMsg("vee thinking", "Vee is thinking");
   try {
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify({
-        model: localStorage.getItem(LS_MODEL) || "claude-fable-5",
-        max_tokens: 8192,
-        system: systemPrompt(),
-        messages: aiHistory.slice(-12),
-      }),
-    });
-    const data = await resp.json();
+    const text = getProvider() === "openrouter"
+      ? await callOpenRouter(key)
+      : await callAnthropic(key);
     thinking.remove();
-    if (data.error) {
-      addMsg("vee", `<b>API error:</b> ${esc(data.error.message || JSON.stringify(data.error))}`);
-    } else {
-      const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
-      aiHistory.push({ role: "assistant", content: text });
-      const div = addMsg("vee", mdToHtml(text));
-      bindApplyButtons(div);
-    }
+    aiHistory.push({ role: "assistant", content: text });
+    const div = addMsg("vee", mdToHtml(text));
+    bindApplyButtons(div);
   } catch (err) {
     thinking.remove();
-    addMsg("vee", `<b>Network error:</b> ${esc(String(err))}`);
+    addMsg("vee", `<b>Error:</b> ${esc(String(err.message || err))}`);
   }
   aiBusy = false;
+}
+
+async function callAnthropic(key) {
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": key,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: getAiModel(),
+      max_tokens: 8192,
+      system: systemPrompt(),
+      messages: aiHistory.slice(-12),
+    }),
+  });
+  const data = await resp.json();
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+  return (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+}
+
+async function callOpenRouter(key) {
+  const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "authorization": "Bearer " + key,
+      "HTTP-Referer": "https://juanshep1.github.io/vanta/ide/",
+      "X-Title": "Vanta Studio",
+    },
+    body: JSON.stringify({
+      model: getAiModel(),
+      max_tokens: 8192,
+      messages: [{ role: "system", content: systemPrompt() },
+                 ...aiHistory.slice(-12)],
+    }),
+  });
+  const data = await resp.json();
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+  const msg = data.choices && data.choices[0] && data.choices[0].message;
+  if (!msg) throw new Error("empty response from OpenRouter");
+  return msg.content || "";
 }
 
 function offlineVee(prompt) {
@@ -648,7 +707,7 @@ function offlineVee(prompt) {
     const name = uniqueName(chosen.file);
     fetch(`templates/${chosen.file}`).then((r) => r.text()).then((code) => {
       createFile(name, code);
-      addMsg("vee", `I'm in offline mode (no API key), but I loaded my <b>${esc(chosen.name)}</b> template into <code>${esc(name)}</code> — press <b>Run</b>!<br><br>Add an Anthropic API key in ⚙ settings and I can write brand-new programs for you.`);
+      addMsg("vee", `I'm in offline mode (no API key), but I loaded my <b>${esc(chosen.name)}</b> template into <code>${esc(name)}</code> — press <b>Run</b>!<br><br>Add a Claude or OpenRouter key in ⚙ settings and I can write brand-new programs for you.`);
     });
     return;
   }
@@ -662,7 +721,7 @@ function offlineVee(prompt) {
   } else if (p.includes("explain")) {
     reply = `Open the <b>Cheatsheet</b> in the toolbar for the whole language on one page. Roughly: <code>let</code> creates, <code>change</code> updates, <code>say</code> prints, blocks end with <code>end</code>, and <code>to name() ... give back ...</code> defines functions.<br><br><i>(Add an API key in ⚙ settings and I'll explain your exact code.)</i>`;
   } else {
-    reply = `I'm in <b>offline mode</b> right now. I can still:<br>• load any template (try “make me a snake game”)<br>• explain common errors (run your code, then “fix my error”)<br>• show the <b>Cheatsheet</b><br><br>For full AI — writing new programs, fixing your exact code — add an Anthropic API key in ⚙ settings.`;
+    reply = `I'm in <b>offline mode</b> right now. I can still:<br>• load any template (try “make me a snake game”)<br>• explain common errors (run your code, then “fix my error”)<br>• show the <b>Cheatsheet</b><br><br>For full AI — writing new programs, fixing your exact code — add a Claude or OpenRouter key in ⚙ settings.`;
   }
   addMsg("vee", reply);
 }
@@ -834,23 +893,43 @@ function init() {
 
   // settings
   const refreshAiMode = () => {
-    $("aiMode").textContent = localStorage.getItem(LS_API)
-      ? `Claude · ${(localStorage.getItem(LS_MODEL) || "claude-fable-5").replace("claude-", "")}`
+    const p = PROVIDERS[getProvider()];
+    $("aiMode").textContent = getAiKey()
+      ? `${p.label} · ${getAiModel().replace("claude-", "")}`
       : "offline helper · add an API key for full AI";
+  };
+  const fillProviderFields = (provider) => {
+    const p = PROVIDERS[provider];
+    $("apiKey").value = localStorage.getItem(p.keyLS) || "";
+    $("apiKey").placeholder = p.placeholder;
+    $("aiModel").value = localStorage.getItem(p.modelLS) || p.defaultModel;
+    $("providerNote").textContent = p.note;
+    const list = $("modelList");
+    list.innerHTML = "";
+    for (const m of p.models) {
+      const o = document.createElement("option");
+      o.value = m;
+      list.appendChild(o);
+    }
   };
   refreshAiMode();
   $("settings").onclick = () => {
-    $("apiKey").value = localStorage.getItem(LS_API) || "";
-    $("aiModel").value = localStorage.getItem(LS_MODEL) || "claude-fable-5";
+    $("aiProvider").value = getProvider();
+    fillProviderFields(getProvider());
     $("settingsModal").hidden = false;
   };
+  $("aiProvider").onchange = () => fillProviderFields($("aiProvider").value);
   $("settingsSave").onclick = () => {
+    const provider = $("aiProvider").value;
+    const p = PROVIDERS[provider];
+    localStorage.setItem(LS_PROVIDER, provider);
     const k = $("apiKey").value.trim();
-    if (k) localStorage.setItem(LS_API, k); else localStorage.removeItem(LS_API);
-    localStorage.setItem(LS_MODEL, $("aiModel").value);
+    if (k) localStorage.setItem(p.keyLS, k); else localStorage.removeItem(p.keyLS);
+    const m = $("aiModel").value.trim();
+    if (m) localStorage.setItem(p.modelLS, m); else localStorage.removeItem(p.modelLS);
     $("settingsModal").hidden = true;
     refreshAiMode();
-    toast(k ? "Vee is fully powered up!" : "Vee is in offline mode");
+    toast(k ? `Vee is powered by ${p.label}!` : "Vee is in offline mode");
   };
   $("settingsClose").onclick = () => { $("settingsModal").hidden = true; };
 
@@ -859,7 +938,7 @@ function init() {
   $("cheatClose").onclick = () => { $("cheatModal").hidden = true; };
 
   // greeting
-  addMsg("vee", `Hey! I'm <b>Vee</b> — I live inside Vanta Studio and I write Vanta.<br><br>Try: <i>“make me a snake game”</i>, <i>“explain my code”</i>, or run something and click <i>“fix my error”</i>.<br><br>⚙ Add an Anthropic API key to give me my full brain.`);
+  addMsg("vee", `Hey! I'm <b>Vee</b> — I live inside Vanta Studio and I write Vanta.<br><br>Try: <i>“make me a snake game”</i>, <i>“explain my code”</i>, or run something and click <i>“fix my error”</i>.<br><br>⚙ Add a Claude or OpenRouter API key to give me my full brain.`);
 
   boot();
 }

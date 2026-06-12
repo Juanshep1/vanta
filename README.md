@@ -77,8 +77,9 @@ multi-file projects, syntax highlighting, a console, and a **canvas with a game
 API** (`rect`, `circle`, `key_down`, an `on_frame()` loop at 30 fps) so you can
 write and play games in Vanta — a complete Snake ships as a template, written
 entirely in Vanta. It also has **Vee**, a built-in AI assistant: add your own
-Claude API key in settings and Vee writes whole Vanta projects straight into
-your editor (it works as an offline helper without one).
+**Claude or OpenRouter** API key in settings and Vee writes whole Vanta
+projects straight into your editor — with OpenRouter you can point it at any
+model (GPT, Gemini, Llama, Claude). It works as an offline helper without a key.
 
 Live: **https://juanshep1.github.io/vanta/ide/** — or locally:
 

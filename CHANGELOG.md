@@ -8,9 +8,10 @@
   `rect` `circle` `line` `text_at` `key_down` `mouse_x` `mouse_y` `mouse_down`
   `stop_game`, plus an `on_frame()` game loop at 30 fps — Snake, Paint, and
   bouncing-ball demos ship as templates, all written in Vanta
-- **Vee, an AI assistant** built into the Studio — powered by the Claude API
-  (bring your own key; it knows the whole Vanta language and applies generated
-  files straight into your project), with a useful offline mode
+- **Vee, an AI assistant** built into the Studio — bring your own **Claude or
+  OpenRouter** key (OpenRouter lets you pick any model: GPT, Gemini, Llama,
+  Claude). Vee knows the whole Vanta language and applies generated files
+  straight into your project; a useful offline mode works without a key
 - `reset_runtime()` host API in the interpreter so IDEs/REPLs can re-run
   programs cleanly
 - Template smoke tests (`tools/ide_headless.py`) wired into the test suite
