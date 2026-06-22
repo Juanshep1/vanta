@@ -32,7 +32,7 @@ import base64
 import hashlib
 import contextlib
 
-VERSION = "4.4"
+VERSION = "4.5"
 
 # Command-line arguments passed to a Vanta program (after the script name).
 PROGRAM_ARGS = []
@@ -500,11 +500,15 @@ def first_word(line):
 
 def split_top_level(text, sep):
     """Split on sep, but not inside (), [], {} or "strings"."""
-    parts, cur, depth, in_str = [], [], 0, False
+    parts, cur, depth, in_str, esc = [], [], 0, False, False
     for c in text:
         if in_str:
             cur.append(c)
-            if c == '"':
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
                 in_str = False
         elif c == '"':
             in_str = True
@@ -2636,9 +2640,20 @@ def b_html_escape(args):
              .replace('"', "&quot;").replace("'", "&#39;"))
 
 
+def b_typeof(args):
+    _need(args, 1, "typeof")
+    v = args[0]
+    if isinstance(v, bool): return "bool"
+    if isinstance(v, (int, float)): return "number"
+    if isinstance(v, str): return "text"
+    if isinstance(v, list): return "list"
+    if isinstance(v, dict): return "map"
+    return "nothing"
+
+
 BUILTINS = {
     # conversions & inspection
-    "length": b_length, "text": b_text, "number": b_number,
+    "length": b_length, "text": b_text, "number": b_number, "typeof": b_typeof,
     "type_of": b_type_of, "is_number": b_is_number, "is_text": b_is_text,
     "is_list": b_is_list, "is_map": b_is_map, "is_function": b_is_function,
     "is_nothing": b_is_nothing, "is_a": b_is_a,
@@ -2806,8 +2821,55 @@ def check_name(name, lineno):
                          f"pick another name")
 
 
+def _escape_for_single_line(s):
+    """Make raw triple-quoted text survive the single-line string tokenizer AND the
+    {expr} interpolation pass verbatim: double backslashes, escape quotes, turn braces
+    literal ({{/}}), and fold newlines/tabs into \\n / \\t."""
+    s = s.replace("\\", "\\\\").replace('"', '\\"')
+    s = s.replace("{", "{{").replace("}", "}}")
+    s = s.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n").replace("\t", "\\t")
+    return s
+
+
+def expand_triple_strings(source):
+    """Collapse \"\"\"...\"\"\" blocks (multi-line, RAW - braces are literal, no escapes
+    needed) into a single-line \"...\" literal so the rest of the line-based pipeline is
+    unchanged. Newlines consumed inside a block are re-emitted at the end of its line so
+    error line numbers stay aligned. # comments and normal \"strings\" are left alone."""
+    if '"""' not in source:
+        return source
+    out = []
+    i, n = 0, len(source)
+    pending = 0                               # blank lines owed to keep numbering aligned
+    while i < n:
+        c = source[i]
+        if c == "\n":
+            out.append("\n" * (1 + pending)); pending = 0; i += 1; continue
+        if c == "#":                          # comment to end of line - copy verbatim
+            j = source.find("\n", i)
+            if j == -1: out.append(source[i:]); break
+            out.append(source[i:j]); i = j; continue
+        if c == '"':
+            if source[i + 1:i + 3] == '""':   # triple-quoted block
+                j = source.find('"""', i + 3)
+                if j == -1:
+                    raise VantaError('a triple-quoted (""") text value is missing its closing """')
+                content = source[i + 3:j]
+                pending += content.count("\n")
+                out.append('"' + _escape_for_single_line(content) + '"')
+                i = j + 3; continue
+            j = i + 1                          # ordinary single-line string - copy verbatim
+            while j < n and source[j] != '"':
+                j += 2 if (source[j] == "\\" and j + 1 < n) else 1
+            out.append(source[i:j + 1]); i = j + 1; continue
+        out.append(c); i += 1
+    if pending: out.append("\n" * pending)
+    return "".join(out)
+
+
 def load_lines(source):
     """Keep real line numbers; drop blank lines and # / note comments."""
+    source = expand_triple_strings(source)    # multi-line """raw""" strings -> single line
     lines = []
     for i, raw in enumerate(source.splitlines(), start=1):
         text = raw.strip()

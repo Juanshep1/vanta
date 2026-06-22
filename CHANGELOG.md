@@ -1,5 +1,34 @@
 # Changelog
 
+## 4.5 — triple-quoted strings (write HTML the easy way)
+The biggest day-to-day pain in Vanta was building a web page: you had to glue an
+HTML string together line-by-line (`change html to html + "..."`) and double every
+literal `{`/`}` as `{{`/`}}` so it wouldn't be read as interpolation. Now there's a
+better way, borrowed from Python:
+
+- **`"""..."""` triple-quoted strings.** They span multiple lines and are **raw** —
+  braces are literal (no `{{`/`}}`), so you paste CSS/JS exactly as written:
+
+  ```
+  let page be """<!doctype html><html><head><style>
+  body { margin:0; color:#0a84ff }
+  .card { border-radius:12px }
+  </style></head><body>
+    <h1>hello</h1>
+  </body></html>"""
+  write_file("app.html", page)
+  ```
+
+  For dynamic values, just close the block and concatenate:
+  `"""<h1>""" + title + """</h1>"""`. Regular single-line `"...{name}..."` strings
+  still interpolate exactly as before (and still use `{{`/`}}` for literal braces),
+  so every existing program keeps working.
+- Implemented as a source pre-pass (`expand_triple_strings`) that collapses a block
+  into a single-line literal while preserving line numbers for error messages; the
+  rest of the line-based pipeline is unchanged. String splitting is now escape-aware.
+- Reminder of what Vanta already had (and people forget): **`#` comments** (whole-line
+  or trailing) and **`{expr}` string interpolation**.
+
 ## 4.2 — a real compiler (3.2× faster again)
 Vanta no longer re-reads the syntax tree every time it runs a line. It now
 **compiles each program once into nested Python closures** — every operator,
