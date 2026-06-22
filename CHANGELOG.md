@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.6 — open_url works on phones
+`open_url(...)` now opens pages on **Android (Termux)** and **iPhone (iSH)**, not just
+desktops. On Termux it uses `termux-open-url` / `termux-open` (install `termux-api` for
+auto-open); everywhere it also **prints the address** so it's tappable if no launcher
+exists. Combined with `serve()` — which is pure Python sockets and already runs
+on-device — you can now build a web app on your phone and open it in the phone's
+browser straight from the terminal. Desktop behavior is unchanged (still honors
+`$BROWSER`, e.g. a chromeless app window).
+
 ## 4.5 — triple-quoted strings (write HTML the easy way)
 The biggest day-to-day pain in Vanta was building a web page: you had to glue an
 HTML string together line-by-line (`change html to html + "..."`) and double every
