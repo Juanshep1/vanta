@@ -443,6 +443,17 @@ python3 run_tests.py
 This runs the assertion-based tests in `tests/` and then runs every example to
 make sure nothing crashes.
 
+## Ecosystem
+
+- **[vanbrew](https://github.com/Juanshep1/vanbrew)** — a one-file package manager
+  (pip + Homebrew in one). `vanbrew install vanta` to get the language, plus vcode,
+  vc, vself and more.
+- **[vcode](https://github.com/Juanshep1/vcode)** — a Claude Code–style terminal
+  coding agent that speaks Vanta: it reads, writes, runs and debugs `.va` programs
+  for you. `vanbrew install vcode`.
+- **[Harbor](https://github.com/Juanshep1/harbor)** — a Docker-style container
+  engine whose entire engine is a Vanta program; a real tool written in Vanta.
+
 ## Why I built it
 
 Most languages were designed by programmers for programmers, and it shows in all
