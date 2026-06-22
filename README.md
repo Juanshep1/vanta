@@ -443,13 +443,6 @@ python3 run_tests.py
 This runs the assertion-based tests in `tests/` and then runs every example to
 make sure nothing crashes.
 
-## What's next
-
-- A browser playground so you can try it with nothing installed
-- A bytecode compiler for more speed
-- A way to fetch and install community packages
-- More of the standard library
-
 ## Why I built it
 
 Most languages were designed by programmers for programmers, and it shows in all
