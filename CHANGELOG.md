@@ -1,5 +1,19 @@
 # Changelog
 
+## 4.7 — images: download, binary serving, and HTML→PNG/PDF
+Vanta can now handle real binary/image work end-to-end, so apps like a card maker can
+fetch AI art, save it, render designs, and serve them:
+- **`download(url, dest [, headers])`** — binary-safe fetch (writes raw bytes to a file,
+  no text decoding) for images / PDFs / any binary.
+- **`base64_to_bytes(s)` / `bytes_to_base64(list)`** — binary base64 (e.g. decode a
+  base64 PNG to bytes, or build a `data:` URI).
+- **`serve()` can return binary** — a handler may give back `{"file": "/path.png",
+  "type": "image/png"}` to stream a file straight off disk (add `"download": yes` for an
+  attachment), or `{"bytes": [...], "type": ...}` for a raw byte body. Text/JSON replies
+  are unchanged.
+- **`render_html(input, out [, width, height [, mode]])`** — rasterizes an HTML file/URL
+  with headless Chrome: `"png"` → a screenshot at width×height, `"pdf"` → a printed PDF.
+
 ## 4.6 — open_url works on phones
 `open_url(...)` now opens pages on **Android (Termux)** and **iPhone (iSH)**, not just
 desktops. On Termux it uses `termux-open-url` / `termux-open` (install `termux-api` for
