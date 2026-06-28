@@ -40,11 +40,39 @@ say text(length(hits)) + " addresses currently hold 100"
 #   ... play the game ...
 #   unfreeze(lock)                       # release the lock
 
+# --- 4. on/off hotkeys (like the Python trainers) ---
+# Give the cheat a toggle key. on_hotkey runs a function each time the key is
+# pressed, even while the game has focus. (macOS: grant your terminal
+# Accessibility / Input-Monitoring permission the first time.)
+#
+#   let health_addr be hits[0]
+#   let lock be 0
+#   let is_on be no
+#   to toggle_health()
+#       if is_on
+#           unfreeze(lock)
+#           change is_on to no
+#           say "infinite health OFF"
+#       otherwise
+#           change lock to freeze(pid, health_addr, 999)
+#           change is_on to yes
+#           say "infinite health ON"
+#       end
+#   end
+#   on_hotkey("f1", toggle_health)        # tap F1 to toggle
+#   on_hotkey("f2", make give write_int(pid, gold_addr, 99999))   # F2 = max gold
+#   say "Trainer running. F1 = infinite health, F2 = max gold. Ctrl-C to quit."
+#   while yes
+#       sleep(1)                          # keep alive so the hotkeys keep working
+#   end
+
 # Other tools:
-#   read_int(pid, addr)          read a 4-byte integer
-#   read_float(pid, addr)        read a 4-byte float
-#   write_float(pid, addr, 1.0)  write a float
-#   read_mem(pid, addr, 16)      read raw bytes (a list of 0-255)
-#   write_mem(pid, addr, bytes)  write raw bytes
+#   read_int(pid, addr)          read a 4-byte integer (also read_float, read_mem)
+#   write_float(pid, addr, 1.0)  write a float (also write_int, write_mem)
 #   mem_regions(pid)             list the readable memory regions
 #   my_pid()                     this program's own pid (safe to test on)
+#   key_pressed("f1")            is a key currently held down?
+#   wait_key("f1")               block until a key is pressed
+#   press_key("space")           simulate a key press   (key_down / key_up to hold)
+#   type_text("hello")           type a string
+#   mouse_move(x, y)             move the cursor   (mouse_click / mouse_pos)

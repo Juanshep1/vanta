@@ -1,5 +1,18 @@
 # Changelog
 
+## 4.9 — input & global hotkeys (on/off keys for your trainers)
+Trainers can now have toggle keys like the Python ones. New builtins:
+- **`on_hotkey(key, fn)`** — run a function every time a key is pressed, even while
+  the game has focus (returns an id; `clear_hotkey(id)` to stop). e.g.
+  `on_hotkey("f1", toggle_health)`.
+- **`key_pressed(key)`** — is a key held right now · **`wait_key(key)`** — block until pressed.
+- **`press_key(key)`**, **`key_down`/`key_up`** (hold), **`type_text(text)`**.
+- **`mouse_move(x,y)`**, **`mouse_click(["right"])`**, **`mouse_pos()`** → `{x,y}`.
+
+Cross-platform: macOS (CoreGraphics), Windows (user32), Linux (xdotool). On macOS,
+grant your terminal **Accessibility / Input-Monitoring** permission the first time
+(System Settings → Privacy). Updated `examples/trainer.va` shows the F1-toggle pattern.
+
 ## 4.8 — game cheats: read & write another program's memory
 You can now write game trainers in Vanta as easily as a pymem script or Cheat
 Engine — find a value in a running game's memory, then change or freeze it. Pure
