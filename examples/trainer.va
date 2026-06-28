@@ -1,0 +1,50 @@
+# trainer.va — a game memory trainer ("cheat"), written in Vanta.
+#
+# This is the same workflow as Cheat Engine or a pymem script in Python, but in
+# Vanta: find the game's process, scan its memory for a value you can see on
+# screen (health, gold, ammo), narrow it down as the value changes, then WRITE
+# or FREEZE that address.
+#
+# Editing your OWN process works with no special permission. Editing ANOTHER
+# program needs privileges: run with `sudo vanta trainer.va` (and on macOS,
+# System Integrity Protection may still block it). For single-player / offline
+# games — online games have anti-cheat and editing them breaks their terms.
+
+# --- 1. find the game ---
+let pid be find_pid("MyGame")          # the process name (try process_list() to list them)
+if pid is 0
+    say "Game not found. Running processes:"
+    for each p in process_list()
+        say "  " + text(p["pid"]) + "  " + p["name"]
+    end
+    stop
+end
+say "Attached to " + text(pid)
+
+# --- 2. find the value (the Cheat-Engine narrow-down) ---
+# Suppose your health on screen is 100 right now:
+let hits be mem_scan(pid, 100)
+say text(length(hits)) + " addresses currently hold 100"
+
+# Take some damage so health becomes (say) 80, then keep only the addresses
+# that changed to 80. Repeat with new values until one address is left.
+#   change hits to mem_next(pid, hits, 80)
+#   change hits to mem_next(pid, hits, 65)
+# (for decimals use the "float" kind: mem_scan(pid, 99.5, "float"))
+
+# --- 3. cheat it ---
+# Once one address remains, it's your health:
+#   let addr be hits[0]
+#   write_int(pid, addr, 999)            # set it once
+#   let lock be freeze(pid, addr, 999)   # OR lock it forever (infinite health)
+#   ... play the game ...
+#   unfreeze(lock)                       # release the lock
+
+# Other tools:
+#   read_int(pid, addr)          read a 4-byte integer
+#   read_float(pid, addr)        read a 4-byte float
+#   write_float(pid, addr, 1.0)  write a float
+#   read_mem(pid, addr, 16)      read raw bytes (a list of 0-255)
+#   write_mem(pid, addr, bytes)  write raw bytes
+#   mem_regions(pid)             list the readable memory regions
+#   my_pid()                     this program's own pid (safe to test on)

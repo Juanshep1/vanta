@@ -1,5 +1,29 @@
 # Changelog
 
+## 4.8 — game cheats: read & write another program's memory
+You can now write game trainers in Vanta as easily as a pymem script or Cheat
+Engine — find a value in a running game's memory, then change or freeze it. Pure
+stdlib, cross-platform (macOS via mach, Linux via `/proc/<pid>/mem`, Windows via
+`ReadProcessMemory`).
+
+```
+let pid be find_pid("MyGame")        # find the game
+let hits be mem_scan(pid, 100)       # all addresses holding 100 (your health)
+change hits to mem_next(pid, hits, 80)   # narrow as it changes, until one is left
+write_int(pid, hits[0], 999)         # set health to 999
+freeze(pid, hits[0], 999)            # ...or lock it forever (infinite health)
+```
+
+New builtins: `process_list()`, `find_pid(name)`, `my_pid()`, `read_int`/`write_int`,
+`read_float`/`write_float`, `read_mem`/`write_mem` (raw bytes), `mem_regions`,
+`mem_scan(pid, value [, "float"])`, `mem_next` (the Cheat-Engine narrow-down),
+`freeze`/`unfreeze`. See `examples/trainer.va`.
+
+Editing your **own** process works freely (great for learning/testing — `my_pid()`).
+Editing **another** program needs privileges (`sudo` / Administrator), and on macOS
+System Integrity Protection may block it. For single-player / offline games — online
+games run anti-cheat and editing them breaks their terms of service.
+
 ## 4.7 — images: download, binary serving, and HTML→PNG/PDF
 Vanta can now handle real binary/image work end-to-end, so apps like a card maker can
 fetch AI art, save it, render designs, and serve them:
