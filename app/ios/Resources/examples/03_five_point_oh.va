@@ -1,0 +1,29 @@
+# a tour of the Vanta 5.0 standard library
+let xs be [7, 3, 3, 9, 1, 7, 5]
+say "list:      {xs}"
+let u be unique(xs)
+say "unique:    {u}"
+let s be sort(xs, "desc")
+say "sorted dn: {s}"
+let pairs be zip(["a", "b", "c"], [1, 2, 3])
+say "zip:       {pairs}"
+let ch be chunk(range(1, 10), 3)
+say "chunk:     {ch}"
+
+let hero be {"name": "vanta", "hp": 100}
+let buffed be merge(hero, {"hp": 130, "shield": yes})
+say "merge:     {buffed}"
+let mana be get(hero, "mana", 50)
+say "get w/ fallback: {mana}"
+
+let title be title_case("the dark language")
+say "title:     {title}"
+let price be format_number(1234567.891, 2)
+say "money:     {price}"
+
+say "clamp(999, 0, 100) = {clamp(999, 0, 100)}"
+say "round(pi, 4)       = {round(pi, 4)}"
+
+let stamp be parse_date("2026-07-04")
+let pretty be format_date(stamp, "%A, %B %d %Y")
+say "date:      {pretty}"

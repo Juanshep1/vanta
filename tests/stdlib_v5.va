@@ -1,0 +1,69 @@
+# Vanta 5.0 stdlib: lists, maps, text, numbers, dates.
+
+# ---- lists ----
+assert(unique([1, 2, 2, 3, 1]) == [1, 2, 3], "unique")
+assert(zip([1, 2], ["a", "b"]) == [[1, "a"], [2, "b"]], "zip")
+assert(flatten([[1], [2, 3], 4]) == [1, 2, 3, 4], "flatten")
+assert(index_of([5, 6, 7], 6) == 1, "index_of found")
+assert(index_of([5, 6, 7], 9) == -1, "index_of missing")
+assert(index_of("hello", "ll") == 2, "index_of text")
+assert(insert_at([1, 3], 1, 2) == [1, 2, 3], "insert_at")
+assert(length(shuffle([1, 2, 3])) == 3, "shuffle keeps length")
+assert(contains([1, 2, 3], pick([1, 2, 3])), "pick comes from the list")
+assert(chunk([1, 2, 3, 4, 5], 2) == [[1, 2], [3, 4], [5]], "chunk")
+assert(sort([3, 1, 2], "desc") == [3, 2, 1], "sort desc")
+assert(sort([3, 1, 2]) == [1, 2, 3], "sort asc default")
+
+to is_even(n)
+    give back n % 2 == 0
+end
+assert(any_where(is_even, [1, 3, 4]), "any_where yes")
+assert(not any_where(is_even, [1, 3, 5]), "any_where no")
+assert(all_where(is_even, [2, 4, 6]), "all_where yes")
+assert(not all_where(is_even, [2, 3]), "all_where no")
+
+# ---- maps ----
+let m be {"a": 1, "b": 2}
+assert(get(m, "a") == 1, "get hit")
+assert(get(m, "z", 99) == 99, "get fallback")
+assert(get(m, "z") == nothing, "get default nothing")
+assert(has_key(m, "a"), "has_key yes")
+assert(not has_key(m, "z"), "has_key no")
+assert(remove_key(m, "a") == {"b": 2}, "remove_key")
+assert(has_key(m, "a"), "remove_key leaves original alone")
+assert(merge({"a": 1}, {"b": 2}, {"a": 9}) == {"a": 9, "b": 2}, "merge")
+assert(entries({"x": 1}) == [["x", 1]], "entries")
+
+# ---- text ----
+assert(repeat_text("ab", 3) == "ababab", "repeat_text")
+assert(title_case("hello world") == "Hello World", "title_case")
+assert(capitalize("hello there") == "Hello there", "capitalize")
+assert(last_index_of("abcabc", "b") == 4, "last_index_of text")
+assert(last_index_of([1, 2, 1], 1) == 2, "last_index_of list")
+assert(format_number(1234567.891, 2) == "1,234,567.89", "format_number")
+assert(format_number(1234567.891) == "1,234,568", "format_number whole")
+
+# ---- numbers ----
+assert(clamp(15, 0, 10) == 10, "clamp high")
+assert(clamp(-5, 0, 10) == 0, "clamp low")
+assert(clamp(5, 0, 10) == 5, "clamp inside")
+assert(sign(-3) == -1, "sign negative")
+assert(sign(0) == 0, "sign zero")
+assert(sign(7) == 1, "sign positive")
+assert(round(3.14159, 2) == 3.14, "round with digits")
+assert(round(3.6) == 4, "round plain")
+assert(pi > 3.14 and pi < 3.15, "pi constant")
+assert(abs(asin(1) - pi / 2) < 0.0001, "asin")
+assert(abs(acos(1)) < 0.0001, "acos")
+assert(abs(atan(1) - pi / 4) < 0.0001, "atan")
+assert(abs(atan2(1, 1) - pi / 4) < 0.0001, "atan2")
+let rf be random_float()
+assert(rf >= 0 and rf < 1, "random_float range")
+
+# ---- dates ----
+let stamp be parse_date("2026-07-04")
+assert(format_date(stamp, "%Y-%m-%d") == "2026-07-04", "date round trip")
+assert(format_date(stamp, "%d/%m/%Y") == "04/07/2026", "format_date pattern")
+assert(parse_date("04 Jul 2026", "%d %b %Y") == stamp, "parse_date pattern")
+
+say "stdlib_v5: all good"

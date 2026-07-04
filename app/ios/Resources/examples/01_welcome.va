@@ -1,0 +1,20 @@
+# say hello, meet variables, and see Vanta read like English
+say "Welcome to Vanta Pocket!"
+
+let name be "friend"
+say "Hello {name} - this whole program is plain English."
+
+let lucky be random(1, 100)
+say "Your lucky number today is {lucky}."
+
+if lucky is over 90
+    say "Whoa - that is a rare one."
+otherwise if lucky is over 50
+    say "Not bad at all."
+otherwise
+    say "The next one will be bigger. Probably."
+end
+
+repeat 3 times
+    say "Vanta runs entirely on this phone."
+end

@@ -1,0 +1,36 @@
+# your own types, with methods and inheritance
+type Creature
+    has name
+    has sound
+    to setup(name, sound)
+        change me.name to name
+        change me.sound to sound
+    end
+    to speak()
+        say "{me.name} says {me.sound}!"
+    end
+end
+
+type Dragon from Creature
+    has fire
+    to setup(name, sound, fire)
+        change me.name to name
+        change me.sound to sound
+        change me.fire to fire
+    end
+    to speak()
+        super.speak()
+        if me.fire
+            say "...and breathes FIRE."
+        end
+    end
+end
+
+let cat be new Creature("Mochi", "meow")
+let smaug be new Dragon("Smaug", "ROAR", yes)
+
+for each beast in [cat, smaug]
+    beast.speak()
+end
+
+say "Is Smaug a Creature? " + text(smaug is a Creature)

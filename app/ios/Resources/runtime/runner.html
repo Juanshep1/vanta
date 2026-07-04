@@ -1,0 +1,115 @@
+<!doctype html>
+<!-- Vanta Pocket's engine room. This page is never shown: it lives inside a
+     hidden WKWebView and boots Pyodide (CPython compiled to WebAssembly) from
+     files bundled with the app, then runs the real, unmodified vanta.py.
+     Native Swift talks to it through evaluateJavaScript + message handlers. -->
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+<script src="/pyodide/pyodide.js"></script>
+<script>
+"use strict";
+
+function post(handler, payload) {
+  try { window.webkit.messageHandlers[handler].postMessage(payload); } catch (e) {}
+}
+
+const BOOTSTRAP = `
+import sys, os, builtins
+sys.path.insert(0, '.')
+import vanta
+import js
+
+# Phones have no stdin; route Vanta's 'ask' through window.prompt, which the
+# native side presents as a proper iOS input dialog.
+def _ask(prompt=''):
+    if prompt:
+        print(prompt, end='', flush=True)
+    answer = js.window.prompt(prompt or 'Input:')
+    return answer if answer is not None else ''
+builtins.input = _ask
+
+def vanta_run(code):
+    vanta.reset_runtime()
+    vanta.PROGRAM_ARGS.clear()
+    try:
+        vanta.run_source(code)
+    except vanta.VantaError as e:
+        print('Oops! ' + str(e))
+    except SystemExit:
+        pass
+    except Exception as e:
+        print('Internal error: ' + str(e))
+
+def write_project_file(name, content):
+    with open(name, 'w') as f:
+        f.write(content)
+
+def list_written_files():
+    out = {}
+    for name in os.listdir('.'):
+        if not os.path.isfile(name):
+            continue
+        if name == 'vanta.py' or name.endswith('.pyc'):
+            continue
+        try:
+            if os.path.getsize(name) > 512 * 1024:
+                continue
+            with open(name, 'r') as f:
+                out[name] = f.read()
+        except Exception:
+            pass
+    return out
+`;
+
+let pyodide = null;
+let pyRun = null, pyWrite = null, pyList = null;
+
+async function boot() {
+  post("state", "booting");
+  pyodide = await loadPyodide({ indexURL: "/pyodide/" });
+  pyodide.setStdout({ batched: (s) => post("out", s + "\n") });
+  pyodide.setStderr({ batched: (s) => post("out", s + "\n") });
+  const vantaSrc = await (await fetch("/vanta.py")).text();
+  pyodide.FS.writeFile("vanta.py", vantaSrc);
+  await pyodide.runPythonAsync(BOOTSTRAP);
+  pyRun = pyodide.globals.get("vanta_run");
+  pyWrite = pyodide.globals.get("write_project_file");
+  pyList = pyodide.globals.get("list_written_files");
+  post("state", "ready");
+}
+
+// Called from Swift. `files` is {name: content} for the whole project so
+// read_file / import see every file; `main` is the file to execute.
+window.vantaRun = function (main, files) {
+  if (!pyRun) { post("out", "engine is still booting…\n"); post("done", "1"); return; }
+  try {
+    const before = {};
+    for (const [name, content] of Object.entries(files)) {
+      pyWrite(name, content);
+      before[name] = content;
+    }
+    pyRun(files[main]);
+    // Report files the program created or changed, so they show up in Files.
+    const writtenPy = pyList();
+    const written = writtenPy.toJs({ dict_converter: Object.fromEntries });
+    writtenPy.destroy();
+    const changed = {};
+    for (const [name, content] of Object.entries(written)) {
+      if (before[name] !== content) changed[name] = content;
+    }
+    if (Object.keys(changed).length > 0) post("files", changed);
+    post("done", "0");
+  } catch (e) {
+    post("out", "[engine error] " + (e && e.message ? e.message : String(e)) + "\n");
+    post("done", "1");
+  }
+};
+
+boot().catch((e) => {
+  post("out", "The Vanta engine failed to start: " + (e && e.message ? e.message : String(e)) + "\n");
+  post("state", "failed");
+});
+</script>
+</body>
+</html>

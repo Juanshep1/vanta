@@ -1,0 +1,30 @@
+# an interactive quiz - `ask` pops up a real input box on your phone
+say "SPACE QUIZ - three questions."
+let score be 0
+
+ask "1) Which planet has the great red spot?" into a1
+if lowercase(trim(a1)) is "jupiter"
+    say "Correct!"
+    increase score by 1
+otherwise
+    say "It was Jupiter."
+end
+
+ask "2) How many moons does Mars have?" into a2
+if trim(a2) is "2"
+    say "Correct - Phobos and Deimos!"
+    increase score by 1
+otherwise
+    say "It has 2."
+end
+
+ask "3) What galaxy do we live in? (two words)" into a3
+if lowercase(trim(a3)) is "milky way"
+    say "Correct!"
+    increase score by 1
+otherwise
+    say "The Milky Way."
+end
+
+say "You scored {score} out of 3."
+say "Perfect score!" if score is 3 otherwise "Run it again and beat that."

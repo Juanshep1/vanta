@@ -672,7 +672,7 @@ Functions: to add(a, b) ... give back a + b ... end. Defaults: to f(x, y be 2). 
 Types: type Dog / has name / to speak() ... me.name ... end / end. new Dog("Rex"). setup() runs on creation; show() controls printing. Inheritance: type Pup from Dog, super.speak(), d is a Dog.
 Errors: attempt ... rescue e ... end. fail("msg"). assert(cond, "msg").
 Input: ask "Q?" into x (browser prompt).
-Stdlib: length text number uppercase lowercase trim replace split join sort reverse range contains sum product min max abs round floor ceil sqrt sin cos tan random(a,b) now to_json from_json matches find_all replace_all. import "math"/"lists"/"text"/"random" (random lib: shuffle choice sample roll chance).
+Stdlib: length text number uppercase lowercase trim replace split join sort sort_by reverse range contains sum product min max abs round(x[,digits]) floor ceil sqrt sin cos tan clamp sign random(a,b) random_float unique zip flatten index_of insert_at shuffle pick chunk repeat_text title_case capitalize format_number get(m,k,fallback) has_key remove_key merge entries format_date parse_date now to_json from_json matches find_all replace_all. import "math"/"lists"/"text"/"random" (random lib: shuffle choice sample roll chance).
 RESERVED words (never use as variable names): to be is at in by has from when match make fix new super times back each.
 
 STUDIO CANVAS API (host builtins available here):

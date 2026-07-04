@@ -63,7 +63,7 @@ git clone https://github.com/Juanshep1/vanta.git
 cd vanta
 ./vanta run examples/hello.va     # run a program
 ./vanta repl                      # start the interactive REPL
-./vanta version                   # 3.3
+./vanta version                   # 5.0
 ```
 
 `./vanta program.va` works too, and so does `python3 vanta.py program.va` if you
@@ -87,6 +87,16 @@ Live: **https://juanshep1.github.io/vanta/ide/** — or locally:
 python3 -m http.server 8000     # from the repo root
 # open http://localhost:8000/ide/
 ```
+
+## Vanta Pocket — the iOS app
+
+[**Vanta Pocket**](app/ios/) is a native iPhone/iPad IDE for Vanta, written in
+SwiftUI: multi-file projects, a syntax-highlighted editor with a Vanta keyboard
+bar, a live console (`ask` pops a native input dialog), bundled examples — and
+**vcode**, the Vanta coding agent, as a chat panel that writes, runs, and fixes
+programs right on your phone. Programs execute entirely on-device: the real
+`vanta.py` runs inside CPython-on-WebAssembly bundled with the app, so it works
+in airplane mode. Build it with Xcode — see [app/ios/README.md](app/ios/README.md).
 
 ## The playground
 
@@ -364,12 +374,17 @@ written in Vanta. To publish your own, drop a `.va` file (or a folder with a
 ```
 text:     length text number uppercase lowercase trim replace starts_with
           ends_with find split lines pad_left pad_right join chr code
+          repeat_text title_case capitalize format_number
 bytes:    read_bytes band bor bxor bnot shift_left shift_right
-numbers:  abs round floor ceil sqrt power sin cos tan log exp min max
-          sum product random now
+numbers:  abs round floor ceil sqrt power sin cos tan asin acos atan atan2
+          log exp min max sum product clamp sign random random_float now
 lists:    first last range contains keys values sort reverse slice push pop
-          remove_at
-higher:   map keep reduce each count_where find_where sort_by
+          remove_at unique zip flatten index_of last_index_of insert_at
+          shuffle pick chunk
+maps:     get has_key remove_key merge entries
+higher:   map keep reduce each count_where find_where sort_by any_where
+          all_where
+dates:    format_date parse_date
 modules:  import "math" / "lists" / "text" / "random" (the bundled lib/)
 types:    type_of is_a is_number is_text is_list is_map is_function is_nothing
 regex:    matches find_all replace_all

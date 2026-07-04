@@ -16,7 +16,7 @@ enum AISystemPrompt {
     Types: type Dog / has name / to speak() ... me.name ... end / end. new Dog("Rex"). setup() runs on creation; show() controls printing. Inheritance: type Pup from Dog, super.speak(), d is a Dog.
     Errors: attempt ... rescue e ... end. fail("msg"). assert(cond, "msg").
     Input: ask "Q?" into x.
-    Stdlib: length text number uppercase lowercase trim replace split join sort reverse range contains sum product min max abs round floor ceil sqrt sin cos tan random(a,b) now to_json from_json read_file write_file matches find_all replace_all sleep. import "math"/"lists"/"text"/"random".
+    Stdlib: length text number uppercase lowercase trim replace split join sort sort_by reverse range contains sum product min max abs round(x[,digits]) floor ceil sqrt sin cos tan clamp sign random(a,b) random_float unique zip flatten index_of insert_at shuffle pick chunk repeat_text title_case capitalize format_number get(m,k,fallback) has_key remove_key merge entries format_date parse_date now to_json from_json read_file write_file matches find_all replace_all sleep. import "math"/"lists"/"text"/"random".
 
     THE WEB (Vanta is full-stack — it can build real servers and call APIs):
     HTTP client: http_get(url[, headers]) / http_post(url, body[, headers]) / http_request(method, url[, body][, headers]). Each gives back a map {"status", "body", "headers"}. If body is a map/list it's sent as JSON. Use from_json(res["body"]) to parse a JSON response.

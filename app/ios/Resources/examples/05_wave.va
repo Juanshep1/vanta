@@ -1,0 +1,9 @@
+# math painting an ASCII wave, right on your phone
+let width be 34
+for each row in range(16)
+    let angle be row / 2.5
+    let offset be round((sin(angle) + 1) * (width / 2 - 2))
+    let bar be repeat_text(" ", offset) + "@@"
+    say bar
+end
+say "sin() made that. Change 2.5 and run again."

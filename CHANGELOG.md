@@ -1,5 +1,28 @@
 # Changelog
 
+## 5.0 — stdlib completeness + Vanta Pocket (the iOS IDE)
+The everyday helpers that were missing are now built in — no more writing
+`unique` yourself:
+
+- **lists** — `unique`, `zip`, `flatten`, `index_of`, `last_index_of`,
+  `insert_at`, `shuffle`, `pick` (random element), `chunk(xs, n)`,
+  `any_where(fn, xs)`, `all_where(fn, xs)`, and `sort(xs, "desc")`.
+- **maps** — `get(m, key, fallback)`, `has_key`, `remove_key`, `merge`,
+  `entries` (a map as `[[key, value], ...]`).
+- **text** — `repeat_text`, `title_case`, `capitalize`,
+  `format_number(n, digits)` with thousands separators.
+- **numbers** — `clamp(x, low, high)`, `sign`, `round(x, digits)`,
+  `asin`, `acos`, `atan`, `atan2`, `random_float()`.
+- **dates** — `format_date(stamp, pattern)` and `parse_date(text, pattern)`
+  (strftime-style patterns; both have sensible defaults).
+
+And the headline: **[Vanta Pocket](app/ios/)** — a native iOS IDE for Vanta,
+built with SwiftUI. Multi-file projects, a syntax-highlighted editor with a
+Vanta keyboard toolbar, a console that supports `ask`, examples, and offline
+execution (the WebAssembly build of Vanta runs on the phone — no server, no
+Python). It also ships **vcode**, the Vanta coding agent, as a chat panel:
+add your Anthropic or OpenRouter key and it writes projects right on your phone.
+
 ## 4.9 — input & global hotkeys (on/off keys for your trainers)
 Trainers can now have toggle keys like the Python ones. New builtins:
 - **`on_hotkey(key, fn)`** — run a function every time a key is pressed, even while

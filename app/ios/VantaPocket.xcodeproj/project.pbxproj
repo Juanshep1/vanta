@@ -1,0 +1,399 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		2479E1075A9244D88323DFF3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B55D0AEC7D773FAF7B6D5B76 /* Assets.xcassets */; };
+		2493551691A3F012242E8B97 /* FilesScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7586C94A7B6439D0C65D9A7 /* FilesScreen.swift */; };
+		3AA60F4FDB2FF4B53C57194C /* AISystemPrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E094D6FE3D624865A591550 /* AISystemPrompt.swift */; };
+		51BF130019DE69D052006244 /* CodeEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77BB9A81ED22E429409E3D9A /* CodeEditorView.swift */; };
+		5350DDB84BEE1713F5F3742B /* examples in Resources */ = {isa = PBXBuildFile; fileRef = 734AA598A996AEBEE9E1AEE4 /* examples */; };
+		5881CA653B96994A2FDB9DF2 /* VantaPocketApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 245753C6516040470BCBA706 /* VantaPocketApp.swift */; };
+		5C0BE65B1337AA6337B99674 /* AIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60577F46C4B967D17AAD8CC6 /* AIClient.swift */; };
+		60B819F1A7044520AAC9A95C /* ConsoleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2CF13B2FA820CDB60D4A8B5 /* ConsoleView.swift */; };
+		67FF0A42F5C28C53EFD967D4 /* EditorScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F770A92BB722256C1FB58007 /* EditorScreen.swift */; };
+		844FEAC89E6AE00F3127EF43 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D338F127000E242466CC8096 /* AppModel.swift */; };
+		9133230FC8D340E5B7CB7505 /* vanta.py in Resources */ = {isa = PBXBuildFile; fileRef = E0A24BAA848AAB6672FBAA75 /* vanta.py */; };
+		AE504E33F685F8A9BC9C96BB /* VantaSyntax.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1CE52BE947F83318A948F65 /* VantaSyntax.swift */; };
+		BF8DFC4C6579557B441CE31C /* ExamplesScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ECC08E8851831E522731A3A /* ExamplesScreen.swift */; };
+		C873812F5493E93BB1BC0BFB /* runtime in Resources */ = {isa = PBXBuildFile; fileRef = 4BD999712EC0B5B6BD3CD155 /* runtime */; };
+		DB7DEF2A786EF15038C30A4D /* VantaEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9ABDEE5790F0FE1B8E4DA6BB /* VantaEngine.swift */; };
+		F05B9F14667F146DDB94762B /* pyodide in Resources */ = {isa = PBXBuildFile; fileRef = 25EED6B732283372FF41785F /* pyodide */; };
+		F162F5F759A5885CB18E0F00 /* VcodeScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF1B24306F233E00C5608275 /* VcodeScreen.swift */; };
+		FAA80DCBB75080C01D86F88E /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4918FCD3295904BFC5E3B95 /* SettingsScreen.swift */; };
+		FE1B76B51EF0689EE8C69FC5 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F55D115622C1655E904333C9 /* Theme.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		245753C6516040470BCBA706 /* VantaPocketApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VantaPocketApp.swift; sourceTree = "<group>"; };
+		25EED6B732283372FF41785F /* pyodide */ = {isa = PBXFileReference; lastKnownFileType = folder; name = pyodide; path = Resources/pyodide; sourceTree = SOURCE_ROOT; };
+		38B1C3FBA2EE226FFFDA9271 /* VantaPocket.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = VantaPocket.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3E094D6FE3D624865A591550 /* AISystemPrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISystemPrompt.swift; sourceTree = "<group>"; };
+		4BD999712EC0B5B6BD3CD155 /* runtime */ = {isa = PBXFileReference; lastKnownFileType = folder; name = runtime; path = Resources/runtime; sourceTree = SOURCE_ROOT; };
+		60577F46C4B967D17AAD8CC6 /* AIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIClient.swift; sourceTree = "<group>"; };
+		6ECC08E8851831E522731A3A /* ExamplesScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExamplesScreen.swift; sourceTree = "<group>"; };
+		734AA598A996AEBEE9E1AEE4 /* examples */ = {isa = PBXFileReference; lastKnownFileType = folder; name = examples; path = Resources/examples; sourceTree = SOURCE_ROOT; };
+		77BB9A81ED22E429409E3D9A /* CodeEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeEditorView.swift; sourceTree = "<group>"; };
+		9ABDEE5790F0FE1B8E4DA6BB /* VantaEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VantaEngine.swift; sourceTree = "<group>"; };
+		A1CE52BE947F83318A948F65 /* VantaSyntax.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VantaSyntax.swift; sourceTree = "<group>"; };
+		B2CF13B2FA820CDB60D4A8B5 /* ConsoleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConsoleView.swift; sourceTree = "<group>"; };
+		B55D0AEC7D773FAF7B6D5B76 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B7586C94A7B6439D0C65D9A7 /* FilesScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesScreen.swift; sourceTree = "<group>"; };
+		D338F127000E242466CC8096 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		DF1B24306F233E00C5608275 /* VcodeScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VcodeScreen.swift; sourceTree = "<group>"; };
+		E0A24BAA848AAB6672FBAA75 /* vanta.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = vanta.py; sourceTree = "<group>"; };
+		F4918FCD3295904BFC5E3B95 /* SettingsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsScreen.swift; sourceTree = "<group>"; };
+		F55D115622C1655E904333C9 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		F770A92BB722256C1FB58007 /* EditorScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorScreen.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		136C3D08836F0C2908DE66B4 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				60577F46C4B967D17AAD8CC6 /* AIClient.swift */,
+				3E094D6FE3D624865A591550 /* AISystemPrompt.swift */,
+				D338F127000E242466CC8096 /* AppModel.swift */,
+				77BB9A81ED22E429409E3D9A /* CodeEditorView.swift */,
+				B2CF13B2FA820CDB60D4A8B5 /* ConsoleView.swift */,
+				F770A92BB722256C1FB58007 /* EditorScreen.swift */,
+				6ECC08E8851831E522731A3A /* ExamplesScreen.swift */,
+				B7586C94A7B6439D0C65D9A7 /* FilesScreen.swift */,
+				F4918FCD3295904BFC5E3B95 /* SettingsScreen.swift */,
+				F55D115622C1655E904333C9 /* Theme.swift */,
+				9ABDEE5790F0FE1B8E4DA6BB /* VantaEngine.swift */,
+				245753C6516040470BCBA706 /* VantaPocketApp.swift */,
+				A1CE52BE947F83318A948F65 /* VantaSyntax.swift */,
+				DF1B24306F233E00C5608275 /* VcodeScreen.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		31DA0F8CE74E0284B4529F44 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				38B1C3FBA2EE226FFFDA9271 /* VantaPocket.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		7EDEB8423A54D1975E881864 = {
+			isa = PBXGroup;
+			children = (
+				B55D0AEC7D773FAF7B6D5B76 /* Assets.xcassets */,
+				BDCF500C350F45FC6F0002EB /* Resources */,
+				136C3D08836F0C2908DE66B4 /* Sources */,
+				B0B42A3D5325E399A561ACF0 /* vanta */,
+				31DA0F8CE74E0284B4529F44 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		B0B42A3D5325E399A561ACF0 /* vanta */ = {
+			isa = PBXGroup;
+			children = (
+				E0A24BAA848AAB6672FBAA75 /* vanta.py */,
+			);
+			name = vanta;
+			path = ../..;
+			sourceTree = "<group>";
+		};
+		BDCF500C350F45FC6F0002EB /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				734AA598A996AEBEE9E1AEE4 /* examples */,
+				25EED6B732283372FF41785F /* pyodide */,
+				4BD999712EC0B5B6BD3CD155 /* runtime */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1A516E459B29C349D782341C /* VantaPocket */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6D3A6DE3C3B738F8ADDFBE23 /* Build configuration list for PBXNativeTarget "VantaPocket" */;
+			buildPhases = (
+				59DA66426485BC0E1B395AEE /* Sources */,
+				E35774F8A16C34F75C74629E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = VantaPocket;
+			packageProductDependencies = (
+			);
+			productName = VantaPocket;
+			productReference = 38B1C3FBA2EE226FFFDA9271 /* VantaPocket.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		22B28C24B0FFF440584577DB /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					1A516E459B29C349D782341C = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = A5E83ABA9663DC7E1B2FCA9C /* Build configuration list for PBXProject "VantaPocket" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 7EDEB8423A54D1975E881864;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 31DA0F8CE74E0284B4529F44 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				1A516E459B29C349D782341C /* VantaPocket */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		E35774F8A16C34F75C74629E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2479E1075A9244D88323DFF3 /* Assets.xcassets in Resources */,
+				5350DDB84BEE1713F5F3742B /* examples in Resources */,
+				F05B9F14667F146DDB94762B /* pyodide in Resources */,
+				C873812F5493E93BB1BC0BFB /* runtime in Resources */,
+				9133230FC8D340E5B7CB7505 /* vanta.py in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		59DA66426485BC0E1B395AEE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5C0BE65B1337AA6337B99674 /* AIClient.swift in Sources */,
+				3AA60F4FDB2FF4B53C57194C /* AISystemPrompt.swift in Sources */,
+				844FEAC89E6AE00F3127EF43 /* AppModel.swift in Sources */,
+				51BF130019DE69D052006244 /* CodeEditorView.swift in Sources */,
+				60B819F1A7044520AAC9A95C /* ConsoleView.swift in Sources */,
+				67FF0A42F5C28C53EFD967D4 /* EditorScreen.swift in Sources */,
+				BF8DFC4C6579557B441CE31C /* ExamplesScreen.swift in Sources */,
+				2493551691A3F012242E8B97 /* FilesScreen.swift in Sources */,
+				FAA80DCBB75080C01D86F88E /* SettingsScreen.swift in Sources */,
+				FE1B76B51EF0689EE8C69FC5 /* Theme.swift in Sources */,
+				DB7DEF2A786EF15038C30A4D /* VantaEngine.swift in Sources */,
+				5881CA653B96994A2FDB9DF2 /* VantaPocketApp.swift in Sources */,
+				AE504E33F685F8A9BC9C96BB /* VantaSyntax.swift in Sources */,
+				F162F5F759A5885CB18E0F00 /* VcodeScreen.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		2C11702DCDAC690F27CFA4F5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.juanshep.vantapocket;
+				PRODUCT_NAME = "Vanta Pocket";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B32B6420CFDB9DC17DB11851 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.juanshep.vantapocket;
+				PRODUCT_NAME = "Vanta Pocket";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		C5DC93736FFA712101DFF0C7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		ED54037AA5C80A5248DCBF9A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		6D3A6DE3C3B738F8ADDFBE23 /* Build configuration list for PBXNativeTarget "VantaPocket" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2C11702DCDAC690F27CFA4F5 /* Debug */,
+				B32B6420CFDB9DC17DB11851 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A5E83ABA9663DC7E1B2FCA9C /* Build configuration list for PBXProject "VantaPocket" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				ED54037AA5C80A5248DCBF9A /* Debug */,
+				C5DC93736FFA712101DFF0C7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 22B28C24B0FFF440584577DB /* Project object */;
+}
