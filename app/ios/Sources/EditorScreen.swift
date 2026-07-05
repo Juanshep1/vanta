@@ -43,6 +43,7 @@ struct EditorScreen: View {
                     }
                 } else {
                     Button {
+                        Haptics.tap()
                         model.save(fileName, text)
                         model.currentFile = fileName
                         model.run(fileName)
@@ -73,8 +74,8 @@ struct EditorScreen: View {
             }
             model.currentFile = fileName
         }
-        .onDisappear { model.save(fileName, text) }
-        .onChange(of: text) { model.save(fileName, text) }
+        .onDisappear { model.autosave(fileName, text) }
+        .onChange(of: text) { model.autosave(fileName, text) }
         .onChange(of: model.editorReloadToken) {
             // The open file was rewritten from outside (AI fix / vcode) — pull
             // the new contents into the editor so the change shows immediately.

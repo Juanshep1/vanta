@@ -27,8 +27,14 @@ struct VcodeScreen: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     if !model.chat.isEmpty {
-                        Button("Clear") { model.chat = [] }
-                            .font(.caption).foregroundStyle(Theme.muted)
+                        Button {
+                            model.chat = []
+                            model.vcodeProjectFile = nil
+                        } label: {
+                            Label("New", systemImage: "square.and.pencil")
+                                .font(.caption)
+                        }
+                        .foregroundStyle(Theme.accent)
                     }
                 }
             }
@@ -103,6 +109,22 @@ struct VcodeScreen: View {
 
     private var inputBar: some View {
         VStack(spacing: 6) {
+            // Shows which project follow-up edits will land in, so it's clear
+            // vcode is editing — not spawning — a file.
+            if attached.isEmpty, let active = model.activeProjectFile {
+                HStack(spacing: 6) {
+                    Image(systemName: "pencil.and.outline").font(.caption2)
+                    Text("editing \(active)").font(.caption)
+                    Spacer()
+                    Button("new project") {
+                        model.vcodeProjectFile = nil
+                        model.currentFile = nil
+                    }
+                    .font(.caption2.bold())
+                }
+                .foregroundStyle(Theme.muted)
+                .padding(.horizontal, 16)
+            }
             if !attached.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {

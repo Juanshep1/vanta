@@ -34,7 +34,10 @@ no network, nothing to install on the phone.
   games are actually playable (inline `<canvas>` + JS run in the preview).
   A ⌖ / terminal toggle flips between the rendered view and the text
   console. Ask vcode for "a sales dashboard" or "a paddle game" and it
-  builds the page for you.
+  builds the page for you. Follow-up edits ("add a score", "make it blue")
+  keep editing the SAME .va file — vcode never splits one app into separate
+  files or spawns a new project for an edit; the "editing <file>" chip in the
+  chat bar shows what it's working on, with a one-tap "new project" to reset.
 - **Learn** — bundled example programs (including a dashboard and a game),
   one tap to copy into your files.
 

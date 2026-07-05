@@ -48,6 +48,9 @@ final class AppModel: ObservableObject {
     // ---- vcode chat ----
     @Published var chat: [ChatMessage] = []
     @Published var vcodeBusy = false
+    // The file vcode is currently building. Follow-up edits ("add a score",
+    // "make it blue") keep editing THIS file instead of spawning a new one.
+    @Published var vcodeProjectFile: String?
 
     // ---- settings ----
     @Published var ai = AISettings() { didSet { saveSettings() } }
@@ -91,6 +94,19 @@ final class AppModel: ObservableObject {
             .store(in: &cancellables)
 
         #if DEBUG
+        // Test hook: reproduce the "deleted file pops back up" bug — create a
+        // file, simulate the editor autosaving it, delete it, then autosave
+        // again (as a stale editor would on disappear). It must stay deleted.
+        if ProcessInfo.processInfo.environment["POCKET_DELETETEST"] != nil {
+            let name = "delete_probe.va"
+            createFile(name, contents: "say \"hi\"\n")
+            autosave(name, "say \"edited\"\n")
+            deleteFile(name)
+            autosave(name, "say \"resave attempt\"\n")     // the old bug path
+            let back = FileManager.default.fileExists(atPath: docs.appendingPathComponent(name).path)
+            NSLog("POCKET_DELETETEST result: file_back=%@ (expect false)", back ? "true" : "false")
+        }
+
         // Test hook: SIMCTL_CHILD_POCKET_AUTORUN=<file.va> runs a file as soon
         // as the engine is ready and logs its output, so the whole pipeline
         // can be exercised from the command line.
@@ -135,6 +151,17 @@ final class AppModel: ObservableObject {
 
     func save(_ name: String, _ content: String) {
         try? content.write(to: docs.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        tombstoned.remove(name)
+    }
+
+    // The editor autosaves as you type / when it closes. It must never
+    // re-CREATE a file: if the file was deleted while its editor was still on
+    // screen, saving it back is the "deleted project pops up again" bug. So
+    // autosave only writes to a file that still exists (and isn't tombstoned).
+    func autosave(_ name: String, _ content: String) {
+        guard !tombstoned.contains(name),
+              FileManager.default.fileExists(atPath: docs.appendingPathComponent(name).path) else { return }
+        try? content.write(to: docs.appendingPathComponent(name), atomically: true, encoding: .utf8)
     }
 
     func isSafeName(_ name: String) -> Bool {
@@ -156,9 +183,14 @@ final class AppModel: ObservableObject {
     }
 
     func deleteFile(_ name: String) {
+        tombstoned.insert(name)
         try? FileManager.default.removeItem(at: docs.appendingPathComponent(name))
+        if vcodeProjectFile == name { vcodeProjectFile = nil }
         refreshFiles()
     }
+
+    // Files the user just deleted; guards against a stale editor resaving them.
+    private var tombstoned: Set<String> = []
 
     func renameFile(_ name: String, to rawNew: String) {
         var newName = rawNew.trimmingCharacters(in: .whitespaces)
@@ -217,6 +249,7 @@ final class AppModel: ObservableObject {
                 self.consoleText += code == 0
                     ? "\n· finished in \(seconds)s\n"
                     : "\n· stopped\n"
+                if self.lastError != nil { Haptics.warning() } else if code == 0 { Haptics.success() }
                 self.presentArtifactIfAny(from: self.consoleText, title: name)
             }
         }
@@ -231,6 +264,7 @@ final class AppModel: ObservableObject {
             artifactTitle = title
             artifactReloadToken &+= 1
             showArtifact = true
+            Haptics.tap()
         }
     }
 
@@ -332,9 +366,25 @@ final class AppModel: ObservableObject {
 
     // ---- vcode: the coding agent ----
 
-    func sendToVcode(_ prompt: String, attachments: [String] = []) {
+    // The project vcode is working on this session. Follow-up edits target it
+    // automatically so "add a score" edits the same file instead of making a
+    // new one. Editor files are brought in explicitly with the 📎 button.
+    var activeProjectFile: String? {
+        guard let f = vcodeProjectFile, files.contains(where: { $0.name == f }) else { return nil }
+        return f
+    }
+
+    func sendToVcode(_ prompt: String, attachments rawAttachments: [String] = []) {
         guard !vcodeBusy else { return }
-        // Attach the referenced project files so the model can fix or extend them.
+        // Auto-include the project vcode is working on so follow-up edits keep
+        // editing the SAME file instead of spawning a new one.
+        var attachments = rawAttachments
+        if attachments.isEmpty, let active = activeProjectFile {
+            attachments = [active]
+        }
+        let target = attachments.first ?? vcodeProjectFile
+        if let target { vcodeProjectFile = target }
+
         var payload = prompt
         var shown = prompt
         if !attachments.isEmpty {
@@ -342,7 +392,11 @@ final class AppModel: ObservableObject {
             for name in attachments {
                 payload += "\n\n--- project file: \(name) ---\n\(contents(of: name))"
             }
-            payload += "\n\nWhen you change or extend one of these files, send its COMPLETE new contents in a ```va block whose first line is `# file: <name>`."
+            if let target {
+                payload += "\n\nThis is edit is for the EXISTING project `\(target)`. Return the COMPLETE updated file in ONE ```va block whose first line is `# file: \(target)`. Do NOT create a new file, and do NOT split it into separate files — keep the whole app (including any HTML/CSS/JS) in `\(target)`."
+            } else {
+                payload += "\n\nWhen you change or extend one of these files, send its COMPLETE new contents in a ```va block whose first line is `# file: <name>`."
+            }
         }
         chat.append(ChatMessage(role: .user, text: shown, payload: payload))
         guard !ai.apiKey.isEmpty else {
@@ -381,7 +435,9 @@ final class AppModel: ObservableObject {
             guard !blocks.isEmpty else { return }
             var saved: [String] = []
             for block in blocks {
-                let name = block.name ?? "vcode.va"
+                // An untagged block edits the project already in progress
+                // rather than spawning a brand-new vcode.va every turn.
+                let name = block.name ?? vcodeProjectFile ?? "vcode.va"
                 guard isSafeName(name) else { continue }
                 save(name, block.code)
                 saved.append(name)
@@ -389,6 +445,7 @@ final class AppModel: ObservableObject {
             refreshFiles()
             editorReloadToken &+= 1
             guard let runTarget = saved.first else { return }
+            vcodeProjectFile = runTarget
             currentFile = runTarget
             if saved.count > 1 {
                 chat.append(ChatMessage(role: .status, text: "saved " + saved.joined(separator: ", ")))
