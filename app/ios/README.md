@@ -10,15 +10,23 @@ no network, nothing to install on the phone.
 
 - **Files** — multi-file projects in the app's Documents folder (visible in
   the iOS Files app too). Create, rename, duplicate, swipe-to-delete.
-- **Editor** — syntax highlighting tuned for Vanta, auto-indent that knows
-  `if`/`to`/`while` blocks, and a keyboard bar with the symbols and keywords
-  Vanta uses most (`let`, `be`, `say`, `give back`, brackets, tab).
+- **Editor** — syntax highlighting tuned for Vanta, a line-number gutter,
+  auto-indent that knows `if`/`to`/`while` blocks, and a keyboard bar with
+  the symbols and keywords Vanta uses most (`let`, `be`, `say`, `give back`,
+  brackets, tab).
+- **AI fix** — when a run fails, the failing line is painted red in the
+  editor (its number too) and an error banner offers one-tap **✨ AI fix**:
+  the model gets the file + the error and writes the corrected file back.
 - **Console** — slides up from the bottom, streams output live. `ask` in a
   program pops a real native input dialog. Files your program `write_file`s
   show up in your file list.
 - **vcode** — the Vanta coding agent as a chat panel. Bring your own
-  Anthropic or OpenRouter key (Settings), ask for a program, and vcode writes
-  it, saves it, runs it, reads the output, and fixes its own errors.
+  Anthropic or OpenRouter key (Settings — the full OpenRouter catalog is in a
+  searchable picker), ask for a program, and vcode writes it, saves it, runs
+  it, reads the output, and fixes its own errors. Tap 📎 to attach any of
+  your project files and it fixes or builds on them — replies marked
+  `# file: name.va` are saved to exactly that file, several at a time if
+  needed.
 - **Learn** — bundled example programs, one tap to copy into your files.
 
 ## Build it

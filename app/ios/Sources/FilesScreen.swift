@@ -8,9 +8,10 @@ struct FilesScreen: View {
     @State private var showNewFile = false
     @State private var renameTarget: String?
     @State private var renameText = ""
+    @State private var path: [String] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ZStack {
                 Theme.bg.ignoresSafeArea()
                 if model.files.isEmpty {
@@ -20,6 +21,19 @@ struct FilesScreen: View {
                 }
             }
             .navigationTitle("Vanta Pocket")
+            .navigationDestination(for: String.self) { name in
+                EditorScreen(fileName: name)
+            }
+            .onAppear {
+                #if DEBUG
+                // Test hook: SIMCTL_CHILD_POCKET_OPEN=<file.va> jumps straight
+                // into the editor so screenshots can be scripted.
+                if let open = ProcessInfo.processInfo.environment["POCKET_OPEN"],
+                   path.isEmpty {
+                    path = [open]
+                }
+                #endif
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showNewFile = true } label: {

@@ -11,6 +11,15 @@ struct ChatMessage: Identifiable, Equatable {
     let id = UUID()
     var role: Role
     var text: String
+    // What actually goes to the model (e.g. with attached file contents);
+    // `text` is what the user sees in the bubble.
+    var payload: String? = nil
+}
+
+struct RunError: Equatable {
+    var file: String
+    var line: Int
+    var message: String
 }
 
 @MainActor
@@ -23,6 +32,8 @@ final class AppModel: ObservableObject {
     @Published var consoleText: String = ""
     @Published var isRunning = false
     @Published var showConsole = false
+    @Published var lastError: RunError?
+    @Published var fixingWithAI = false
 
     // ---- vcode chat ----
     @Published var chat: [ChatMessage] = []
@@ -80,6 +91,8 @@ final class AppModel: ObservableObject {
                 }
                 guard engine.state == .ready else { NSLog("POCKET_AUTORUN: engine failed"); return }
                 let output = await engine.runCollectingOutput(main: autorun, files: projectSnapshot())
+                consoleText = output
+                lastError = Self.parseError(from: output, file: autorun)
                 NSLog("POCKET_AUTORUN output >>>\n%@\n<<<", output)
             }
         }
@@ -175,11 +188,13 @@ final class AppModel: ObservableObject {
         consoleText = ""
         showConsole = true
         isRunning = true
+        lastError = nil
         run_start = Date()
         engine.run(main: name, files: projectSnapshot()) { [weak self] code in
             Task { @MainActor in
                 guard let self else { return }
                 self.isRunning = false
+                self.lastError = Self.parseError(from: self.consoleText, file: name)
                 let seconds = String(format: "%.1f", -self.run_start.timeIntervalSinceNow)
                 self.consoleText += code == 0
                     ? "\n· finished in \(seconds)s\n"
@@ -189,6 +204,61 @@ final class AppModel: ObservableObject {
     }
     private var run_start = Date()
 
+    // Vanta errors look like "Oops! line 12: some message".
+    static func parseError(from output: String, file: String) -> RunError? {
+        for rawLine in output.split(separator: "\n").reversed() {
+            let line = String(rawLine)
+            guard line.hasPrefix("Oops!") else { continue }
+            if let match = line.range(of: #"line (\d+): (.+)$"#, options: .regularExpression) {
+                let bits = String(line[match]).dropFirst("line ".count)
+                let parts = bits.split(separator: ":", maxSplits: 1)
+                if let number = Int(parts[0].trimmingCharacters(in: .whitespaces)), parts.count == 2 {
+                    return RunError(file: file, line: number,
+                                    message: parts[1].trimmingCharacters(in: .whitespaces))
+                }
+            }
+            return RunError(file: file, line: 0,
+                            message: String(line.dropFirst("Oops!".count)).trimmingCharacters(in: .whitespaces))
+        }
+        return nil
+    }
+
+    // One-tap repair: send the file + the error to the model, get the whole
+    // corrected file back, save it, and run it again.
+    func fixWithAI(file: String, source: String, onFixed: @escaping (String) -> Void) {
+        guard !fixingWithAI, let error = lastError else { return }
+        guard !ai.apiKey.isEmpty else {
+            consoleText += "\n✨ AI fix needs an API key — add one in Settings.\n"
+            return
+        }
+        fixingWithAI = true
+        let describe = error.line > 0 ? "line \(error.line): \(error.message)" : error.message
+        Task { @MainActor in
+            defer { fixingWithAI = false }
+            let user = """
+            This Vanta program (\(file)) fails with:
+            \(describe)
+
+            THE FILE:
+            \(source)
+
+            Return the COMPLETE corrected file as raw Vanta code — no fences, no commentary.
+            """
+            do {
+                let reply = try await AIClient.chat(system: AISystemPrompt.fixSystem,
+                                                    history: [["role": "user", "content": user]],
+                                                    settings: ai)
+                let fixed = AIClient.stripFences(reply).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
+                save(file, fixed)
+                lastError = nil
+                onFixed(fixed)
+                run(file)
+            } catch {
+                consoleText += "\n✨ AI fix failed: \(error.localizedDescription)\n"
+            }
+        }
+    }
+
     func stopRun() {
         guard isRunning else { return }
         engine.restart()
@@ -197,9 +267,19 @@ final class AppModel: ObservableObject {
 
     // ---- vcode: the coding agent ----
 
-    func sendToVcode(_ prompt: String) {
+    func sendToVcode(_ prompt: String, attachments: [String] = []) {
         guard !vcodeBusy else { return }
-        chat.append(ChatMessage(role: .user, text: prompt))
+        // Attach the referenced project files so the model can fix or extend them.
+        var payload = prompt
+        var shown = prompt
+        if !attachments.isEmpty {
+            shown += "\n📎 " + attachments.joined(separator: ", ")
+            for name in attachments {
+                payload += "\n\n--- project file: \(name) ---\n\(contents(of: name))"
+            }
+            payload += "\n\nWhen you change or extend one of these files, send its COMPLETE new contents in a ```va block whose first line is `# file: <name>`."
+        }
+        chat.append(ChatMessage(role: .user, text: shown, payload: payload))
         guard !ai.apiKey.isEmpty else {
             chat.append(ChatMessage(role: .status,
                 text: "vcode needs an API key — add your Anthropic or OpenRouter key in Settings."))
@@ -213,7 +293,7 @@ final class AppModel: ObservableObject {
         defer { vcodeBusy = false }
         var history: [[String: String]] = chat.compactMap { message in
             switch message.role {
-            case .user: return ["role": "user", "content": message.text]
+            case .user: return ["role": "user", "content": message.payload ?? message.text]
             case .assistant: return ["role": "assistant", "content": message.text]
             case .status: return nil
             }
@@ -231,15 +311,26 @@ final class AppModel: ObservableObject {
             chat.append(ChatMessage(role: .assistant, text: reply))
             history.append(["role": "assistant", "content": reply])
 
-            guard let code = Self.extractCode(reply) else { return }
-            let name = createFile("vcode.va", contents: code) ?? "vcode.va"
-            save(name, code)
+            let blocks = Self.extractFiles(reply)
+            guard !blocks.isEmpty else { return }
+            var saved: [String] = []
+            for block in blocks {
+                let name = block.name ?? "vcode.va"
+                guard isSafeName(name) else { continue }
+                save(name, block.code)
+                saved.append(name)
+            }
             refreshFiles()
+            guard let runTarget = saved.first else { return }
+            currentFile = runTarget
+            if saved.count > 1 {
+                chat.append(ChatMessage(role: .status, text: "saved " + saved.joined(separator: ", ")))
+            }
 
             guard autoFix else { return }
-            chat.append(ChatMessage(role: .status, text: "running \(name)…"))
+            chat.append(ChatMessage(role: .status, text: "running \(runTarget)…"))
             consoleText = ""
-            let output = await engine.runCollectingOutput(main: name, files: projectSnapshot())
+            let output = await engine.runCollectingOutput(main: runTarget, files: projectSnapshot())
             let failed = output.contains("Oops!") || output.contains("Internal error")
             let shown = output.count > 2000 ? String(output.suffix(2000)) : output
             chat.append(ChatMessage(role: .status,
@@ -250,16 +341,45 @@ final class AppModel: ObservableObject {
         }
     }
 
-    static func extractCode(_ reply: String) -> String? {
-        guard let fence = reply.range(of: "```") else { return nil }
-        var rest = String(reply[fence.upperBound...])
-        if let newline = rest.firstIndex(of: "\n") {
-            let lang = rest[..<newline].trimmingCharacters(in: .whitespaces)
-            if lang.count <= 10 { rest = String(rest[rest.index(after: newline)...]) }
+    struct CodeBlock: Equatable {
+        var name: String?
+        var code: String
+    }
+
+    // Every fenced code block in the reply; a first line of `# file: name.va`
+    // names the project file it belongs to.
+    static func extractFiles(_ reply: String) -> [CodeBlock] {
+        var out: [CodeBlock] = []
+        var rest = reply[...]
+        while let fence = rest.range(of: "```") {
+            var body = rest[fence.upperBound...]
+            if let newline = body.firstIndex(of: "\n"),
+               body[..<newline].trimmingCharacters(in: .whitespaces).count <= 10 {
+                body = body[body.index(after: newline)...]
+            }
+            guard let close = body.range(of: "```") else { break }
+            var code = String(body[..<close.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            var name: String? = nil
+            let firstLine = code.firstIndex(of: "\n").map { String(code[..<$0]) } ?? code
+            if firstLine.range(of: #"^#\s*file:"#, options: .regularExpression) != nil {
+                name = firstLine.components(separatedBy: ":").last?
+                    .trimmingCharacters(in: .whitespaces)
+                if let newline = code.firstIndex(of: "\n") {
+                    code = String(code[code.index(after: newline)...])
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                } else {
+                    code = ""
+                }
+            }
+            if !code.isEmpty { out.append(CodeBlock(name: name, code: code + "\n")) }
+            rest = body[close.upperBound...]
         }
-        guard let close = rest.range(of: "```") else { return nil }
-        let code = String(rest[..<close.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-        return code.isEmpty ? nil : code + "\n"
+        return out
+    }
+
+    // The first code block's contents (used by the chat bubble's Apply button).
+    static func extractCode(_ reply: String) -> String? {
+        extractFiles(reply).first?.code
     }
 
     // ---- settings persistence ----

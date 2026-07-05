@@ -29,6 +29,16 @@ enum AISystemPrompt {
     """
 
     static var pocketSystem: String {
-        base + "\n\nBUILD MODE: When the user asks for a program, reply with a short sentence and ONE complete ```va code block```. If you are shown the program's output and it contains an error (a line starting with 'Oops!'), fix the program and send the COMPLETE corrected file again in a ```va block```."
+        base + """
+
+
+        BUILD MODE: When the user asks for a program, reply with a short sentence and a complete ```va code block```. If you are shown the program's output and it contains an error (a line starting with 'Oops!'), fix the program and send the COMPLETE corrected file again in a ```va block```.
+
+        PROJECT FILES: The user can attach project files to the chat (their contents appear as `--- project file: name.va ---` sections). To change, fix, or extend a project file, send its COMPLETE new contents in a ```va block``` whose FIRST line is `# file: <name>.va` — the IDE saves each such block to that exact file. You may send several blocks to touch several files. Blocks without a `# file:` line are saved as vcode.va.
+        """
+    }
+
+    static var fixSystem: String {
+        base + "\n\nFIX MODE: You are given a Vanta file and the error it produces. Return ONLY the complete corrected file as raw Vanta code — no markdown fences, no commentary. Change as little as possible."
     }
 }
