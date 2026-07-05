@@ -1,0 +1,32 @@
+let sales be [12, 19, 9, 23, 17, 28, 21]
+let days be ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+let total be sum(sales)
+let best be max(sales)
+
+let bars be ""
+for each i in range(length(sales))
+    let v be sales[i]
+    let h be round(v / best * 140)
+    let d be days[i]
+    change bars to bars + """<div class="bar"><div class="fill" style="height:""" + text(h) + """px"></div><span>""" + d + """</span></div>"""
+end
+
+say """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+body{margin:0;background:#0b0b14;color:#e6e9f5;font-family:-apple-system,sans-serif;padding:24px}
+h1{font-size:22px;margin:0 0 4px}.sub{color:#8a8aa0;margin-bottom:24px}
+.cards{display:flex;gap:12px;margin-bottom:28px}
+.card{flex:1;background:#161428;border-radius:14px;padding:16px}
+.card .n{font-size:28px;font-weight:800;color:#b388ff}.card .l{color:#8a8aa0;font-size:13px}
+.chart{display:flex;align-items:flex-end;gap:10px;height:180px}
+.bar{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px}
+.fill{width:100%;background:linear-gradient(180deg,#b388ff,#6a46dc);border-radius:6px 6px 0 0}
+.bar span{color:#8a8aa0;font-size:12px}
+</style></head><body>
+<h1>Weekly Sales</h1><div class="sub">A dashboard rendered from Vanta</div>
+<div class="cards">
+<div class="card"><div class="n">""" + text(total) + """</div><div class="l">total units</div></div>
+<div class="card"><div class="n">""" + text(best) + """</div><div class="l">best day</div></div>
+<div class="card"><div class="n">""" + text(round(total / 7)) + """</div><div class="l">daily avg</div></div>
+</div>
+<div class="chart">""" + bars + """</div>
+</body></html>"""

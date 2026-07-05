@@ -56,6 +56,17 @@ enum VantaSyntax {
                 continue
             }
             if c == 34 { // '"' string
+                // Triple-quoted raw string """...""" (multi-line HTML/CSS/JS).
+                if i + 2 < n && s.character(at: i + 1) == 34 && s.character(at: i + 2) == 34 {
+                    var j = i + 3
+                    while j + 2 < n && !(s.character(at: j) == 34 && s.character(at: j + 1) == 34 && s.character(at: j + 2) == 34) {
+                        j += 1
+                    }
+                    j = (j + 2 < n) ? j + 3 : n
+                    color(Theme.ustr, i, j - i)
+                    i = j
+                    continue
+                }
                 var j = i + 1
                 while j < n && s.character(at: j) != 34 {
                     if s.character(at: j) == 92 && j + 1 < n { j += 2 } else { j += 1 }

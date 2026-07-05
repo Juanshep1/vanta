@@ -34,6 +34,12 @@ final class AppModel: ObservableObject {
     @Published var showConsole = false
     @Published var lastError: RunError?
     @Published var fixingWithAI = false
+    // A rendered visual output (dashboard / chart / game) — set when a run
+    // emits an HTML page, shown full-screen in the Artifact preview.
+    @Published var artifactHTML: String?
+    @Published var artifactTitle = "Preview"
+    @Published var showArtifact = false
+    @Published var artifactReloadToken: UInt64 = 0
     // Bumped when something outside the editor rewrites the open file (AI fix,
     // vcode). The editor watches this and reloads its text so on-screen code
     // always reflects the change, even if the text binding didn't propagate.
@@ -97,6 +103,7 @@ final class AppModel: ObservableObject {
                 let output = await engine.runCollectingOutput(main: autorun, files: projectSnapshot())
                 consoleText = output
                 lastError = Self.parseError(from: output, file: autorun)
+                presentArtifactIfAny(from: output, title: autorun)
                 NSLog("POCKET_AUTORUN output >>>\n%@\n<<<", output)
                 // POCKET_AUTOFIX exercises the AI-fix path (with a local fake
                 // repair) so the live editor update can be verified headlessly.
@@ -199,6 +206,7 @@ final class AppModel: ObservableObject {
         showConsole = true
         isRunning = true
         lastError = nil
+        artifactHTML = nil
         run_start = Date()
         engine.run(main: name, files: projectSnapshot()) { [weak self] code in
             Task { @MainActor in
@@ -209,10 +217,38 @@ final class AppModel: ObservableObject {
                 self.consoleText += code == 0
                     ? "\n· finished in \(seconds)s\n"
                     : "\n· stopped\n"
+                self.presentArtifactIfAny(from: self.consoleText, title: name)
             }
         }
     }
     private var run_start = Date()
+
+    // If a run's output is (or contains) an HTML page, capture it as a visual
+    // artifact and open the full-screen preview.
+    func presentArtifactIfAny(from output: String, title: String) {
+        if let html = Self.extractHTML(from: output) {
+            artifactHTML = html
+            artifactTitle = title
+            artifactReloadToken &+= 1
+            showArtifact = true
+        }
+    }
+
+    static func extractHTML(from output: String) -> String? {
+        for marker in ["<!doctype html", "<html"] {
+            if let r = output.range(of: marker, options: .caseInsensitive) {
+                let html = String(output[r.lowerBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                return html.isEmpty ? nil : html
+            }
+        }
+        // A bare fragment that clearly renders (canvas / svg / a closed tag).
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("<"), trimmed.count > 12,
+           trimmed.contains("</") || trimmed.contains("/>") {
+            return trimmed
+        }
+        return nil
+    }
 
     // Vanta errors look like "Oops! line 12: some message".
     static func parseError(from output: String, file: String) -> RunError? {
@@ -363,9 +399,16 @@ final class AppModel: ObservableObject {
             consoleText = ""
             let output = await engine.runCollectingOutput(main: runTarget, files: projectSnapshot())
             let failed = output.contains("Oops!") || output.contains("Internal error")
+            let hasArtifact = !failed && Self.extractHTML(from: output) != nil
             let shown = output.count > 2000 ? String(output.suffix(2000)) : output
-            chat.append(ChatMessage(role: .status,
-                text: (failed ? "✗ error — " : "✓ ran clean — ") + "output:\n" + (shown.isEmpty ? "(no output)" : shown)))
+            let note: String
+            if hasArtifact {
+                note = "✓ ran clean — opening the preview…"
+                presentArtifactIfAny(from: output, title: runTarget)
+            } else {
+                note = (failed ? "✗ error — " : "✓ ran clean — ") + "output:\n" + (shown.isEmpty ? "(no output)" : shown)
+            }
+            chat.append(ChatMessage(role: .status, text: note))
             if !failed || round == maxRounds { return }
             history.append(["role": "user",
                             "content": "I ran that and got this output:\n\(shown)\nPlease fix the program and send the COMPLETE corrected file in a ```va block."])

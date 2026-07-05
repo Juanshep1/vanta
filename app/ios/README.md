@@ -28,7 +28,15 @@ no network, nothing to install on the phone.
   your project files and it fixes or builds on them — replies marked
   `# file: name.va` are saved to exactly that file, several at a time if
   needed.
-- **Learn** — bundled example programs, one tap to copy into your files.
+- **Artifacts** — when a program emits an HTML page (a `say` of a full
+  `<!doctype html>` document), the app renders it FULL-SCREEN and live
+  instead of printing markup: dashboards show the real dashboard, and
+  games are actually playable (inline `<canvas>` + JS run in the preview).
+  A ⌖ / terminal toggle flips between the rendered view and the text
+  console. Ask vcode for "a sales dashboard" or "a paddle game" and it
+  builds the page for you.
+- **Learn** — bundled example programs (including a dashboard and a game),
+  one tap to copy into your files.
 
 ## Build it
 

@@ -1,0 +1,29 @@
+# a playable game — Vanta builds a full HTML5 canvas page, the IDE renders it
+say """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><style>
+html,body{margin:0;height:100%;background:#0b0b14;color:#e6e9f5;font-family:-apple-system,sans-serif;overflow:hidden;text-align:center}
+#hud{padding:12px;font-size:18px}canvas{background:#12101f;border-radius:12px;touch-action:none}
+.hint{color:#8a8aa0;font-size:13px;margin-top:8px}
+</style></head><body>
+<div id="hud">Score: <b id="s">0</b></div>
+<canvas id="c" width="320" height="420"></canvas>
+<div class="hint">Tap / drag to move the paddle. Keep the ball up!</div>
+<script>
+const cv=document.getElementById('c'),x=cv.getContext('2d'),sEl=document.getElementById('s');
+let px=130,bx=160,by=120,vx=2.4,vy=2.8,score=0,over=false;
+function move(e){const r=cv.getBoundingClientRect();const t=(e.touches?e.touches[0].clientX:e.clientX)-r.left;px=Math.max(0,Math.min(260,t-30));}
+cv.addEventListener('touchmove',e=>{e.preventDefault();move(e);},{passive:false});
+cv.addEventListener('mousemove',e=>{if(e.buttons)move(e);});
+function loop(){
+  x.clearRect(0,0,320,420);
+  bx+=vx;by+=vy;
+  if(bx<8||bx>312){vx=-vx;} if(by<8){vy=-vy;}
+  if(by>392&&bx>px&&bx<px+60){vy=-Math.abs(vy)*1.03;vx*=1.02;score++;sEl.textContent=score;}
+  if(by>420){over=true;}
+  x.fillStyle='#b388ff';x.fillRect(px,404,60,10);
+  x.beginPath();x.arc(bx,by,8,0,7);x.fillStyle='#f0c46a';x.fill();
+  if(over){x.fillStyle='#e6e9f5';x.font='20px sans-serif';x.fillText('Game Over — tap to retry',30,210);}
+  else{requestAnimationFrame(loop);}
+}
+cv.addEventListener('click',()=>{if(over){over=false;score=0;sEl.textContent=0;bx=160;by=120;vx=2.4;vy=2.8;loop();}});
+loop();
+</script></body></html>"""

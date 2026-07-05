@@ -34,6 +34,10 @@ struct RootView: View {
         .overlay(alignment: .bottomTrailing) {
             EngineHostView(engine: model.engine).frame(width: 1, height: 1).opacity(0.01)
         }
+        // Visual programs (dashboards, games) open full-screen here.
+        .fullScreenCover(isPresented: $model.showArtifact) {
+            ArtifactScreen().environmentObject(model)
+        }
     }
 }
 

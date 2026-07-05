@@ -51,6 +51,13 @@ struct EditorScreen: View {
                     }
                     .disabled(model.engine.state == .booting)
                 }
+                if model.artifactHTML != nil {
+                    Button {
+                        model.showArtifact = true
+                    } label: {
+                        Image(systemName: "safari").foregroundStyle(Theme.accent)
+                    }
+                }
                 Button {
                     withAnimation { model.showConsole.toggle() }
                 } label: {
