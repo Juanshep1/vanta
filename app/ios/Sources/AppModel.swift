@@ -34,6 +34,10 @@ final class AppModel: ObservableObject {
     @Published var showConsole = false
     @Published var lastError: RunError?
     @Published var fixingWithAI = false
+    // Bumped when something outside the editor rewrites the open file (AI fix,
+    // vcode). The editor watches this and reloads its text so on-screen code
+    // always reflects the change, even if the text binding didn't propagate.
+    @Published var editorReloadToken: UInt64 = 0
 
     // ---- vcode chat ----
     @Published var chat: [ChatMessage] = []
@@ -94,6 +98,12 @@ final class AppModel: ObservableObject {
                 consoleText = output
                 lastError = Self.parseError(from: output, file: autorun)
                 NSLog("POCKET_AUTORUN output >>>\n%@\n<<<", output)
+                // POCKET_AUTOFIX exercises the AI-fix path (with a local fake
+                // repair) so the live editor update can be verified headlessly.
+                if ProcessInfo.processInfo.environment["POCKET_AUTOFIX"] != nil, lastError != nil {
+                    try? await Task.sleep(for: .seconds(2))
+                    fixWithAI(file: autorun, source: contents(of: autorun)) { _ in }
+                }
             }
         }
         #endif
@@ -227,7 +237,12 @@ final class AppModel: ObservableObject {
     // corrected file back, save it, and run it again.
     func fixWithAI(file: String, source: String, onFixed: @escaping (String) -> Void) {
         guard !fixingWithAI, let error = lastError else { return }
-        guard !ai.apiKey.isEmpty else {
+        #if DEBUG
+        let fakeFix = ProcessInfo.processInfo.environment["POCKET_FAKEFIX"] != nil
+        #else
+        let fakeFix = false
+        #endif
+        guard !ai.apiKey.isEmpty || fakeFix else {
             consoleText += "\n✨ AI fix needs an API key — add one in Settings.\n"
             return
         }
@@ -235,28 +250,41 @@ final class AppModel: ObservableObject {
         let describe = error.line > 0 ? "line \(error.line): \(error.message)" : error.message
         Task { @MainActor in
             defer { fixingWithAI = false }
-            let user = """
-            This Vanta program (\(file)) fails with:
-            \(describe)
-
-            THE FILE:
-            \(source)
-
-            Return the COMPLETE corrected file as raw Vanta code — no fences, no commentary.
-            """
+            let fixed: String
             do {
-                let reply = try await AIClient.chat(system: AISystemPrompt.fixSystem,
-                                                    history: [["role": "user", "content": user]],
-                                                    settings: ai)
-                let cleaned = AIClient.stripThinking(reply)
-                let fixed = AIClient.stripFences(cleaned).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
-                save(file, fixed)
-                lastError = nil
-                onFixed(fixed)
-                run(file)
+                if fakeFix {
+                    // Deterministic local repair for tests: fix the classic
+                    // lenth->length typo so the editor update can be observed.
+                    fixed = source.replacingOccurrences(of: "lenth(", with: "length(")
+                } else {
+                    let user = """
+                    This Vanta program (\(file)) fails with:
+                    \(describe)
+
+                    THE FILE:
+                    \(source)
+
+                    Return the COMPLETE corrected file as raw Vanta code — no fences, no commentary.
+                    """
+                    let reply = try await AIClient.chat(system: AISystemPrompt.fixSystem,
+                                                        history: [["role": "user", "content": user]],
+                                                        settings: ai)
+                    let cleaned = AIClient.stripThinking(reply)
+                    fixed = AIClient.stripFences(cleaned).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
+                }
             } catch {
                 consoleText += "\n✨ AI fix failed: \(error.localizedDescription)\n"
+                return
             }
+            // Apply the fix to the editor FIRST and let SwiftUI paint it, so
+            // the corrected code visibly replaces the old text before the
+            // re-run kicks off.
+            save(file, fixed)
+            lastError = nil
+            onFixed(fixed)
+            editorReloadToken &+= 1
+            await Task.yield()
+            run(file)
         }
     }
 
@@ -323,6 +351,7 @@ final class AppModel: ObservableObject {
                 saved.append(name)
             }
             refreshFiles()
+            editorReloadToken &+= 1
             guard let runTarget = saved.first else { return }
             currentFile = runTarget
             if saved.count > 1 {

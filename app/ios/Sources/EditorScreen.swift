@@ -68,6 +68,12 @@ struct EditorScreen: View {
         }
         .onDisappear { model.save(fileName, text) }
         .onChange(of: text) { model.save(fileName, text) }
+        .onChange(of: model.editorReloadToken) {
+            // The open file was rewritten from outside (AI fix / vcode) — pull
+            // the new contents into the editor so the change shows immediately.
+            let latest = model.contents(of: fileName)
+            if latest != text { text = latest }
+        }
     }
 
     private func errorBanner(_ error: RunError) -> some View {
