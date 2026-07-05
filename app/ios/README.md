@@ -21,8 +21,9 @@ no network, nothing to install on the phone.
   program pops a real native input dialog. Files your program `write_file`s
   show up in your file list.
 - **vcode** — the Vanta coding agent as a chat panel. Bring your own
-  Anthropic or OpenRouter key (Settings — the full OpenRouter catalog is in a
-  searchable picker), ask for a program, and vcode writes it, saves it, runs
+  Anthropic, OpenRouter, Ollama Cloud, or NVIDIA key (Settings — every
+  provider keeps its own key and model, so switching never mixes them up;
+  the full OpenRouter catalog is in a searchable picker), ask for a program, and vcode writes it, saves it, runs
   it, reads the output, and fixes its own errors. Tap 📎 to attach any of
   your project files and it fixes or builds on them — replies marked
   `# file: name.va` are saved to exactly that file, several at a time if

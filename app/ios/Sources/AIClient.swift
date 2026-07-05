@@ -2,14 +2,18 @@ import Foundation
 
 struct AISettings: Codable, Equatable {
     var provider: String = "openrouter"   // openrouter | anthropic | ollama-cloud | nvidia
-    var apiKey: String = ""
+    var apiKey: String = ""               // the ACTIVE provider's key
     var model: String = "anthropic/claude-sonnet-4.6"
     var baseURL: String = ""               // optional override (local Ollama / proxy)
     var autocomplete: Bool = true
+    // Each provider keeps its own key and last-used model, so switching
+    // providers never sends one service's key to another.
+    var keys: [String: String] = [:]
+    var models: [String: String] = [:]
 
     init() {}
 
-    enum CodingKeys: String, CodingKey { case provider, apiKey, model, baseURL, autocomplete }
+    enum CodingKeys: String, CodingKey { case provider, apiKey, model, baseURL, autocomplete, keys, models }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? "openrouter"
@@ -17,6 +21,10 @@ struct AISettings: Codable, Equatable {
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? "anthropic/claude-sonnet-4.6"
         baseURL = try c.decodeIfPresent(String.self, forKey: .baseURL) ?? ""
         autocomplete = try c.decodeIfPresent(Bool.self, forKey: .autocomplete) ?? true
+        keys = try c.decodeIfPresent([String: String].self, forKey: .keys) ?? [:]
+        models = try c.decodeIfPresent([String: String].self, forKey: .models) ?? [:]
+        // Migrate a pre-existing single key to the per-provider store.
+        if keys[provider] == nil, !apiKey.isEmpty { keys[provider] = apiKey }
     }
 }
 
@@ -105,6 +113,17 @@ enum AIClient {
         var out = try await chat(system: sys, history: [["role": "user", "content": user]], settings: settings, maxTokens: 90)
         out = stripFences(out)
         return out
+    }
+
+    // Reasoning models (qwen3, deepseek-r1, ...) may emit <think>...</think>
+    // before the answer; drop it so code extraction sees only the reply.
+    static func stripThinking(_ s: String) -> String {
+        var t = s
+        while let open = t.range(of: "<think>"),
+              let close = t.range(of: "</think>", range: open.upperBound..<t.endIndex) {
+            t.removeSubrange(open.lowerBound..<close.upperBound)
+        }
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func stripFences(_ s: String) -> String {

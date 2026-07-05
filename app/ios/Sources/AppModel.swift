@@ -248,7 +248,8 @@ final class AppModel: ObservableObject {
                 let reply = try await AIClient.chat(system: AISystemPrompt.fixSystem,
                                                     history: [["role": "user", "content": user]],
                                                     settings: ai)
-                let fixed = AIClient.stripFences(reply).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
+                let cleaned = AIClient.stripThinking(reply)
+                let fixed = AIClient.stripFences(cleaned).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
                 save(file, fixed)
                 lastError = nil
                 onFixed(fixed)
@@ -302,8 +303,9 @@ final class AppModel: ObservableObject {
         for round in 1...maxRounds {
             let reply: String
             do {
-                reply = try await AIClient.chat(system: AISystemPrompt.pocketSystem,
-                                                history: history, settings: ai)
+                let raw = try await AIClient.chat(system: AISystemPrompt.pocketSystem,
+                                                  history: history, settings: ai)
+                reply = AIClient.stripThinking(raw)
             } catch {
                 chat.append(ChatMessage(role: .status, text: "vcode error: \(error.localizedDescription)"))
                 return
@@ -384,6 +386,24 @@ final class AppModel: ObservableObject {
 
     // ---- settings persistence ----
 
+    // Switching providers swaps in THAT provider's saved key and model, so an
+    // OpenRouter key is never sent to Ollama (and vice versa).
+    func switchProvider(_ provider: String) {
+        ai.provider = provider
+        ai.apiKey = ai.keys[provider] ?? ""
+        ai.model = ai.models[provider] ?? AIClient.defaultModel(for: provider)
+    }
+
+    func setApiKey(_ key: String) {
+        ai.apiKey = key
+        ai.keys[ai.provider] = key
+    }
+
+    func setModel(_ id: String) {
+        ai.model = id
+        ai.models[ai.provider] = id
+    }
+
     private func saveSettings() {
         if let data = try? JSONEncoder().encode(ai) {
             UserDefaults.standard.set(data, forKey: "ai-settings")
@@ -392,7 +412,10 @@ final class AppModel: ObservableObject {
 
     private func loadSettings() {
         if let data = UserDefaults.standard.data(forKey: "ai-settings"),
-           let settings = try? JSONDecoder().decode(AISettings.self, from: data) {
+           var settings = try? JSONDecoder().decode(AISettings.self, from: data) {
+            // Make the active key/model consistent with the per-provider store.
+            settings.apiKey = settings.keys[settings.provider] ?? settings.apiKey
+            settings.model = settings.models[settings.provider] ?? settings.model
             ai = settings
         }
     }

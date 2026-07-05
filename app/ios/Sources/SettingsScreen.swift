@@ -9,18 +9,27 @@ struct SettingsScreen: View {
             ZStack {
                 Theme.bg.ignoresSafeArea()
                 Form {
-                    Section("vcode — AI provider") {
-                        Picker("Provider", selection: $model.ai.provider) {
-                            Text("OpenRouter").tag("openrouter")
-                            Text("Anthropic").tag("anthropic")
-                            Text("Ollama Cloud").tag("ollama-cloud")
-                            Text("NVIDIA").tag("nvidia")
+                    Section {
+                        Picker("Provider", selection: Binding(
+                            get: { model.ai.provider },
+                            set: { model.switchProvider($0) })) {
+                            ForEach(providers, id: \.tag) { provider in
+                                HStack {
+                                    Text(provider.name)
+                                    if hasKey(provider.tag) {
+                                        Image(systemName: "key.fill")
+                                    }
+                                }
+                                .tag(provider.tag)
+                            }
                         }
                         .onChange(of: model.ai.provider) {
-                            model.ai.model = AIClient.defaultModel(for: model.ai.provider)
                             catalog.load(settings: model.ai)
                         }
-                        SecureField("API key", text: $model.ai.apiKey)
+                        SecureField("API key for \(providerName(model.ai.provider))",
+                                    text: Binding(
+                                        get: { model.ai.apiKey },
+                                        set: { model.setApiKey($0) }))
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
                         NavigationLink {
@@ -34,6 +43,13 @@ struct SettingsScreen: View {
                             }
                         }
                         Toggle("Auto-run & fix programs", isOn: $model.autoFix)
+                    } header: {
+                        Text("vcode — AI provider")
+                    } footer: {
+                        let saved = providers.filter { hasKey($0.tag) }.map(\.name)
+                        Text(saved.isEmpty
+                             ? "Each provider keeps its own key and model — switching never mixes them up."
+                             : "Keys saved: \(saved.joined(separator: ", ")). Each provider keeps its own key and model — switching never mixes them up.")
                     }
 
                     Section("Editor") {
@@ -72,6 +88,19 @@ struct SettingsScreen: View {
             .navigationTitle("Settings")
             .onAppear { catalog.load(settings: model.ai) }
         }
+    }
+
+    private var providers: [(name: String, tag: String)] {
+        [("OpenRouter", "openrouter"), ("Anthropic", "anthropic"),
+         ("Ollama Cloud", "ollama-cloud"), ("NVIDIA", "nvidia")]
+    }
+
+    private func providerName(_ tag: String) -> String {
+        providers.first { $0.tag == tag }?.name ?? tag
+    }
+
+    private func hasKey(_ tag: String) -> Bool {
+        !(model.ai.keys[tag] ?? "").isEmpty
     }
 }
 
@@ -148,7 +177,7 @@ struct ModelPickerScreen: View {
                 Section {
                     ForEach(filtered, id: \.self) { id in
                         Button {
-                            model.ai.model = id
+                            model.setModel(id)
                             dismiss()
                         } label: {
                             HStack {
