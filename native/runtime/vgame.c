@@ -648,7 +648,7 @@ static V b_audio_open(int argc, V *a) {
     if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) return VFALSE;
     SDL_AudioSpec want, have;
     SDL_zero(want);
-    want.freq = rate; want.format = AUDIO_S16LSB; want.channels = (Uint8)chans; want.samples = 512; want.callback = NULL;
+    want.freq = rate; want.format = AUDIO_S16LSB; want.channels = (Uint8)chans; want.samples = 256; want.callback = NULL;   /* ~19 ms at 13379 Hz */
     adev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);   /* no allowed changes: SDL converts for us */
     if (!adev) return VFALSE;
     SDL_PauseAudioDevice(adev, 0);
