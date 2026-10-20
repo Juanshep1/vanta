@@ -372,7 +372,8 @@ class Parser:
         if k == "STR":
             return build_string_node(v)
         if k == "NAME":
-            low = v.lower()
+            # lowercase or Capitalized; all-caps TRUE/FALSE are ordinary names (C-style constants)
+            low = v.lower() if v in ("yes", "Yes", "true", "True", "no", "No", "false", "False", "nothing", "Nothing") else v
             if low in ("yes", "true"):
                 return ("lit", True)
             if low in ("no", "false"):
