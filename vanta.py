@@ -35,7 +35,7 @@ import ctypes
 import struct as _struct
 import threading as _threading
 
-VERSION = "5.0"
+VERSION = "5.1"
 
 # Command-line arguments passed to a Vanta program (after the script name).
 PROGRAM_ARGS = []
@@ -72,6 +72,7 @@ PHRASES = {
     ("plus",): "+",
     ("minus",): "-",
     ("times",): "*",
+    ("xor",): "xor",
 }
 
 COMPARE_OPS = {">", "<", ">=", "<=", "==", "!="}
@@ -108,12 +109,25 @@ def tokenize(text):
             i = j + 1
             continue
 
+        if c == "0" and i + 1 < n and text[i + 1] in "xXbBoO":      # 0xFF, 0b1010, 0o17
+            base = {"x": 16, "b": 2, "o": 8}[text[i + 1].lower()]
+            j = i + 2
+            while j < n and (text[j].isalnum() or text[j] == "_"):
+                j += 1
+            digits = text[i + 2:j].replace("_", "")
+            try:
+                tokens.append(("NUM", int(digits, base)))
+            except ValueError:
+                raise VantaError(f"{text[i:j]} is not a valid number")
+            i = j
+            continue
+
         if c.isdigit():
             j, dot = i, False
-            while j < n and (text[j].isdigit() or (text[j] == "." and not dot)):
+            while j < n and (text[j].isdigit() or text[j] == "_" or (text[j] == "." and not dot and j + 1 < n and text[j + 1].isdigit())):
                 dot = dot or text[j] == "."
                 j += 1
-            chunk = text[i:j]
+            chunk = text[i:j].replace("_", "")
             tokens.append(("NUM", float(chunk) if dot else int(chunk)))
             i = j
             continue
@@ -127,11 +141,11 @@ def tokenize(text):
             continue
 
         two = text[i:i + 2]
-        if two in (">=", "<=", "==", "!="):
+        if two in (">=", "<=", "==", "!=", "<<", ">>"):
             tokens.append(("OP", two))
             i += 2
             continue
-        if c in "+-*/%><^":
+        if c in "+-*/%><^&|~":
             tokens.append(("OP", c))
             i += 1
             continue
@@ -235,18 +249,47 @@ class Parser:
         return self.parse_comparison()
 
     def parse_comparison(self):
-        left = self.parse_add_sub()
+        left = self.parse_bitor()
         k, v = self.peek()
         if k == "OP" and v == "isa":
             self.take()
-            return ("isa", left, self.parse_add_sub())
+            return ("isa", left, self.parse_bitor())
         if k == "OP" and v in ("in", "notin"):
             self.take()
-            return (v, left, self.parse_add_sub())
+            return (v, left, self.parse_bitor())
         if k == "OP" and v in COMPARE_OPS:
             self.take()
-            return ("cmp", v, left, self.parse_add_sub())
+            return ("cmp", v, left, self.parse_bitor())
         return left
+
+    # Bitwise operators, loosest to tightest:  |  then  xor  then  &  then  << >>
+    def parse_bitor(self):
+        node = self.parse_bitxor()
+        while self.peek() == ("OP", "|"):
+            self.take()
+            node = ("arith", "|", node, self.parse_bitxor())
+        return node
+
+    def parse_bitxor(self):
+        node = self.parse_bitand()
+        while self.peek() == ("OP", "xor"):
+            self.take()
+            node = ("arith", "xor", node, self.parse_bitand())
+        return node
+
+    def parse_bitand(self):
+        node = self.parse_shift()
+        while self.peek() == ("OP", "&"):
+            self.take()
+            node = ("arith", "&", node, self.parse_shift())
+        return node
+
+    def parse_shift(self):
+        node = self.parse_add_sub()
+        while self.peek()[0] == "OP" and self.peek()[1] in ("<<", ">>"):
+            op = self.take()[1]
+            node = ("arith", op, node, self.parse_add_sub())
+        return node
 
     def parse_add_sub(self):
         node = self.parse_mul_div()
@@ -266,6 +309,9 @@ class Parser:
         if self.peek() == ("OP", "-"):
             self.take()
             return ("neg", self.parse_unary())
+        if self.peek() == ("OP", "~"):
+            self.take()
+            return ("bitnot", self.parse_unary())
         if self.is_word("make"):          # anonymous function: make x give x * 2
             return self.parse_lambda()
         if self.is_word("new"):           # "new Dog(...)" is sugar for "Dog(...)"
@@ -1157,6 +1203,9 @@ def eval_expr(node, env):
             result[eval_expr(key_node, env)] = eval_expr(val_node, env)
         return result
 
+    if tag == "bitnot":
+        return bit_not(eval_expr(node[1], env))
+
     if tag == "neg":
         value = eval_expr(node[1], env)
         if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -1220,8 +1269,8 @@ def eval_expr(node, env):
 
     if tag == "sliceop":
         target = eval_expr(node[1], env)
-        if not isinstance(target, (list, str)):
-            raise VantaError("you can only slice a list or text")
+        if not isinstance(target, (list, str, bytearray)):
+            raise VantaError("you can only slice a list, text, or bytes")
         start = eval_expr(node[2], env) if node[2] is not None else None
         end = eval_expr(node[3], env) if node[3] is not None else None
         for bound in (start, end):
@@ -1389,7 +1438,38 @@ def do_assign(target, value, env):
 # Operators and indexing
 # --------------------------------------------------------------------------
 
+BIT_OPS = {"&", "|", "xor", "<<", ">>"}
+
+
+def bit_op(op, a, b):
+    if type(a) is float and a == int(a):
+        a = int(a)
+    if type(b) is float and b == int(b):
+        b = int(b)
+    if type(a) is not int or type(b) is not int:
+        raise VantaError(f"I can only do bit math ({op}) with whole numbers")
+    if op == "&":
+        return a & b
+    if op == "|":
+        return a | b
+    if op == "xor":
+        return a ^ b
+    if b < 0:
+        raise VantaError("you can't shift by a negative amount")
+    return a << b if op == "<<" else a >> b
+
+
+def bit_not(value):
+    if type(value) is float and value == int(value):
+        value = int(value)
+    if type(value) is not int:
+        raise VantaError("~ only works on whole numbers")
+    return ~value
+
+
 def arithmetic(op, a, b):
+    if op in BIT_OPS:
+        return bit_op(op, a, b)
     # Fast path: both operands are plain numbers (the overwhelmingly common
     # case). `type(x) is int` excludes bool — booleans aren't numbers here — so
     # this is exactly as strict as check_numbers, but without the isinstance
@@ -1474,7 +1554,7 @@ def compare(op, a, b):
 
 
 def get_index(collection, index):
-    if isinstance(collection, (list, str)):
+    if isinstance(collection, (list, str, bytearray)):
         return collection[whole_index(index, len(collection))]
     if isinstance(collection, dict):
         if index not in collection:
@@ -1485,6 +1565,10 @@ def get_index(collection, index):
 
 def set_index(collection, index, value):
     if isinstance(collection, list):
+        collection[whole_index(index, len(collection))] = value
+    elif isinstance(collection, bytearray):
+        if type(value) is not int or not 0 <= value <= 255:
+            raise VantaError("a byte must be a whole number from 0 to 255")
         collection[whole_index(index, len(collection))] = value
     elif isinstance(collection, dict):
         collection[index] = value
@@ -1523,7 +1607,9 @@ def iterate(value):
         return list(value)
     if isinstance(value, dict):
         return list(value.keys())
-    raise VantaError("you can only loop over a list, text, or map")
+    if isinstance(value, bytearray):
+        return list(value)
+    raise VantaError("you can only loop over a list, text, map, or bytes")
 
 
 # ===========================================================================
@@ -1558,9 +1644,9 @@ def tidy_number(value):
 
 def b_length(args):
     _need(args, 1, "length")
-    if isinstance(args[0], (str, list, dict)):
+    if isinstance(args[0], (str, list, dict, bytearray)):
         return len(args[0])
-    raise VantaError("length works on text, lists, or maps")
+    raise VantaError("length works on text, lists, maps, or bytes")
 
 
 def b_text(args):
@@ -2401,6 +2487,80 @@ def b_read_bytes(args):
         raise VantaError(f"could not read file: {e}")
 
 
+def b_read_binary(args):
+    """read_binary(path) -> bytes: a whole file as a compact byte array (fast for big files like game data)."""
+    _need(args, 1, "read_binary")
+    try:
+        with open(display(args[0]), "rb") as f:
+            return bytearray(f.read())
+    except OSError as e:
+        raise VantaError(f"could not read file: {e}")
+
+
+def b_bytes(args):
+    """bytes(n) -> n zero bytes; bytes(list) -> the list's numbers as bytes; bytes(text) -> its UTF-8 bytes."""
+    _need(args, 1, "bytes")
+    v = args[0]
+    if type(v) is int:
+        if v < 0:
+            raise VantaError("bytes needs a size of 0 or more")
+        return bytearray(v)
+    if isinstance(v, str):
+        return bytearray(v.encode("utf-8"))
+    if isinstance(v, (list, bytearray)):
+        try:
+            return bytearray(v)
+        except (ValueError, TypeError):
+            raise VantaError("bytes needs numbers from 0 to 255")
+    raise VantaError("bytes takes a size, a list of numbers, or text")
+
+
+def _byte_arg(args, name, width):
+    data, off = args[0], args[1]
+    if not isinstance(data, (bytearray, list)):
+        raise VantaError(f"{name} reads from bytes")
+    if type(off) is not int or off < 0 or off + width > len(data):
+        raise VantaError(f"{name}: position {display(off)} is outside the {len(data)} bytes")
+    return data, off
+
+
+def _reader(width, signed):
+    def read(args):
+        name = ("s" if signed else "u") + str(width * 8)
+        _need(args, 2, name)
+        data, off = _byte_arg(args, name, width)
+        return int.from_bytes(bytes(data[off:off + width]), "little", signed=signed)
+    return read
+
+
+def _writer(width):
+    def write(args):
+        name = "put_u" + str(width * 8)
+        _need(args, 3, name)
+        data, off = _byte_arg(args, name, width)
+        value = args[2]
+        if type(value) is not int:
+            raise VantaError(f"{name} writes whole numbers")
+        data[off:off + width] = (value & ((1 << (8 * width)) - 1)).to_bytes(width, "little")
+        return None
+    return write
+
+
+def b_write_binary(args):
+    _need(args, 2, "write_binary")
+    try:
+        with open(display(args[0]), "wb") as f:
+            f.write(bytes(args[1]))
+    except (OSError, ValueError, TypeError) as e:
+        raise VantaError(f"could not write file: {e}")
+    return None
+
+
+def b_is_bytes(args):
+    _need(args, 1, "is_bytes")
+    return isinstance(args[0], bytearray)
+
+
 def b_band(args):
     _need(args, 2, "band")
     return int_arg(args[0], "band") & int_arg(args[1], "band")
@@ -2798,6 +2958,7 @@ def b_typeof(args):
     if isinstance(v, str): return "text"
     if isinstance(v, list): return "list"
     if isinstance(v, dict): return "map"
+    if isinstance(v, bytearray): return "bytes"
     return "nothing"
 
 
@@ -3689,6 +3850,11 @@ def b_parse_date(args):
 
 
 BUILTINS = {
+    # bytes (game data, file formats)
+    "read_binary": b_read_binary, "write_binary": b_write_binary, "bytes": b_bytes, "is_bytes": b_is_bytes,
+    "u8": _reader(1, False), "s8": _reader(1, True), "u16": _reader(2, False), "s16": _reader(2, True),
+    "u32": _reader(4, False), "s32": _reader(4, True),
+    "put_u8": _writer(1), "put_u16": _writer(2), "put_u32": _writer(4),
     # conversions & inspection
     "length": b_length, "text": b_text, "number": b_number, "typeof": b_typeof,
     "type_of": b_type_of, "is_number": b_is_number, "is_text": b_is_text,
@@ -3795,6 +3961,8 @@ def type_name(value):
         return "list"
     if isinstance(value, dict):
         return "map"
+    if isinstance(value, bytearray):
+        return "bytes"
     if isinstance(value, (Function, Builtin, BoundMethod)):
         return "function"
     if isinstance(value, VantaType):
@@ -3811,7 +3979,7 @@ def truthy(value):
         return value
     if isinstance(value, (int, float)):
         return value != 0
-    if isinstance(value, (str, list, dict)):
+    if isinstance(value, (str, list, dict, bytearray)):
         return len(value) > 0
     return True
 
@@ -3834,6 +4002,9 @@ def display(value):
     if isinstance(value, dict):
         return "{" + ", ".join(display_item(k) + ": " + display_item(v)
                                for k, v in value.items()) + "}"
+    if isinstance(value, bytearray):          # bytes[34 12 ff], long ones shortened
+        shown = " ".join(f"{x:02x}" for x in value[:32])
+        return f"bytes[{shown}{' …' if len(value) > 32 else ''}]"
     if isinstance(value, Function):
         return f"<function {value.name}>"
     if isinstance(value, Builtin):
@@ -4073,6 +4244,16 @@ def compile_expr(node):
                     return x * y
                 return arithmetic("*", x, y)
             return ev
+        if op in BIT_OPS:
+            fast = {"&": lambda x, y: x & y, "|": lambda x, y: x | y, "xor": lambda x, y: x ^ y,
+                    "<<": lambda x, y: x << y if y >= 0 else bit_op("<<", x, y),
+                    ">>": lambda x, y: x >> y if y >= 0 else bit_op(">>", x, y)}[op]
+            def ev(env):
+                x = a(env); y = b(env)
+                if type(x) is int and type(y) is int:
+                    return fast(x, y)
+                return bit_op(op, x, y)
+            return ev
         return lambda env: arithmetic(op, a(env), b(env))
 
     if tag == "cmp":
@@ -4184,6 +4365,10 @@ def compile_expr(node):
         a = compile_expr(node[1])
         return lambda env: not truthy(a(env))
 
+    if tag == "bitnot":
+        a = compile_expr(node[1])
+        return lambda env: bit_not(a(env))
+
     if tag == "neg":
         a = compile_expr(node[1])
         def ev(env):
@@ -4264,8 +4449,8 @@ def compile_expr(node):
         e = compile_expr(node[3]) if node[3] is not None else None
         def ev(env):
             t = target(env)
-            if not isinstance(t, (list, str)):
-                raise VantaError("you can only slice a list or text")
+            if not isinstance(t, (list, str, bytearray)):
+                raise VantaError("you can only slice a list, text, or bytes")
             start = s(env) if s is not None else None
             end = e(env) if e is not None else None
             for bound in (start, end):
@@ -4581,6 +4766,7 @@ Vanta - a plain-English programming language.
 
   vanta program.va [args]   run a program
   vanta run program.va      run a program (explicit form)
+  vanta build program.va    compile to a native executable (add --run to run it)
   vanta repl                start the interactive REPL
   vanta version             print the version
   vanta help                show this message
@@ -4605,6 +4791,14 @@ def main():
     if command == "repl":
         repl()
         return
+    if command == "build":
+        # Compile to a native executable (native/vantac.py): vanta build program.va [-o name] [--run]
+        here = os.path.dirname(os.path.abspath(__file__))
+        compiler = os.path.join(here, "native", "vantac.py")
+        if not os.path.isfile(compiler):
+            print("Oops! this copy of Vanta doesn't include the native compiler (native/vantac.py)")
+            sys.exit(1)
+        sys.exit(subprocess.call([sys.executable, compiler] + args[1:]))
     if command == "run":
         if len(args) < 2:
             print("Usage: vanta run program.va")

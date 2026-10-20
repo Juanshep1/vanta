@@ -1,0 +1,63 @@
+# Number literals, bit operators and the bytes type (v5.1): what game data and file formats need.
+
+# literals
+assert(0xFF is 255, "hex literal")
+assert(0x1f is 31, "lowercase hex")
+assert(0b1010 is 10, "binary literal")
+assert(0o17 is 15, "octal literal")
+assert(1_000_000 is 1000000, "digit separators")
+assert(0xFF_FF is 65535, "separators in hex")
+
+# operators
+assert((0xF0 & 0x3C) is 0x30, "and")
+assert((0xF0 | 0x0F) is 0xFF, "or")
+assert((0xFF xor 0x0F) is 0xF0, "xor")
+assert((1 << 10) is 1024, "shift left")
+assert((0x8000 >> 15) is 1, "shift right")
+assert(~0 is -1, "not")
+assert((~0x0F & 0xFF) is 0xF0, "not, masked to a byte")
+assert(2 ^ 10 is 1024, "^ is still power")
+
+# precedence: shifts bind tighter than &, & tighter than xor, xor tighter than |, and all looser than + -
+assert((1 + 1 << 2) is 8, "+ before <<")
+assert((0x1234 >> 8 & 0xFF) is 0x12, ">> before &")
+assert((1 | 2 xor 3) is 1, "xor before |")
+assert((6 & 3 is 2) is yes, "& before comparison")
+assert((0xAB >> 4 | 0xC0) is 0xCA, "decode a nibble and set flags")
+
+# bytes
+let b be bytes(8)
+assert(length(b) is 8, "bytes(n) size")
+assert(b[0] is 0, "bytes start at zero")
+change b[0] to 0x34
+change b[1] to 0x12
+assert(u16(b, 0) is 0x1234, "u16 little-endian")
+put_u32(b, 4, 0xDEADBEEF)
+assert(u32(b, 4) is 0xDEADBEEF, "u32 round trip")
+assert(u8(b, 7) is 0xDE, "u8")
+assert(s8(bytes([255]), 0) is -1, "s8")
+assert(s16(bytes([0xFE, 0xFF]), 0) is -2, "s16")
+assert(typeof(b) is "bytes", "typeof bytes")
+assert(length(b[4:6]) is 2, "slices of bytes")
+assert(bytes("hi")[1] is 105, "bytes from text")
+assert(is_bytes(b), "is_bytes")
+assert(not is_bytes([1, 2]), "a list isn't bytes")
+
+let total be 0
+for each x in bytes([1, 2, 3])
+    increase total by x
+end
+assert(total is 6, "for each over bytes")
+
+attempt
+    change b[0] to 256
+    assert(no, "a byte over 255 should fail")
+rescue e
+    assert(yes, "rejects values over 255")
+end
+
+# files
+let path be "/tmp/vanta_bytes_test.bin"
+write_binary(path, bytes([1, 2, 254]))
+let loaded be read_binary(path)
+assert(length(loaded) is 3 and loaded[2] is 254, "write_binary / read_binary")

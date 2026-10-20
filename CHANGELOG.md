@@ -1,5 +1,22 @@
 # Changelog
 
+## 5.1 — native builds + bits and bytes (the game-framework groundwork)
+Vanta programs can now be compiled into real native executables:
+
+- **`vanta build program.va`** — compiles the program to C and builds a native binary
+  (`native/vantac.py` + the C runtime in `native/runtime/`). It uses the interpreter's own parser,
+  so it accepts exactly the same language: functions, closures, types with inheritance and `super`,
+  `attempt`/`rescue`, `match`, comprehensions, `import`. Output and error messages match the
+  interpreter's — `python3 native/test_native.py` checks every test and example both ways.
+  About 70× faster than the interpreter on the benchmark (fib(27) + a 300k loop: 2.2 s → 0.03 s).
+  Web, process and memory-editing builtins are interpreter-only for now; the compiler names any it meets.
+- **Number literals** — `0xFF`, `0b1010`, `0o17`, and digit separators: `1_000_000`, `0xFF_FF`.
+- **Bit operators** — `&`, `|`, `xor`, `<<`, `>>` and `~`, with C-like precedence (shifts, then `&`,
+  then `xor`, then `|`, all looser than `+ -` and tighter than comparisons). `^` is still power.
+- **`bytes`** — a compact byte array for game data and file formats: `bytes(n)`, `bytes([1, 2])`,
+  `bytes("text")`, `read_binary(path)`, `write_binary(path, b)`, indexing/slicing/`for each`, and
+  little-endian readers/writers `u8 s8 u16 s16 u32 s32`, `put_u8 put_u16 put_u32`.
+
 ## 5.0 — stdlib completeness + Vanta Pocket (the iOS IDE)
 The everyday helpers that were missing are now built in — no more writing
 `unique` yourself:
