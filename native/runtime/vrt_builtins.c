@@ -892,10 +892,10 @@ static const Entry table[] = {
     {NULL, NULL}
 };
 
-V vgame_builtin_named(const char *name) __attribute__((weak));   /* present when the game runtime is linked */
+V (*vrt_extra_builtins)(const char *name) = NULL;   /* set by the game runtime when it is linked in */
 V vrt_builtin_named(const char *name) {
     for (const Entry *e = table; e->name; e++) if (!strcmp(e->name, name)) return vrt_builtin(e->name, e->fn);
-    if (vgame_builtin_named) return vgame_builtin_named(name);
+    if (vrt_extra_builtins) return vrt_extra_builtins(name);
     return VUNDEF;
 }
 /* The compiler asks which names exist (so a program using one that isn't here gets a clear message). */

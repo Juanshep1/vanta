@@ -126,6 +126,8 @@ class Compiler:
         self.modules = {}          # absolute path -> module function name
         self.module_order = []
         self.fixed = set()
+        self.folded = {}           # top-level fix NAME be <whole number>: compiled straight to the number
+        self.top_decls = {}        # how many times each top-level name is declared
         self.used_builtins = set()
         self.missing = {}          # interpreter-only builtin name -> first line
 
@@ -151,6 +153,15 @@ class Compiler:
     def collect_globals(self, stmts, from_dir, names, seen):
         """Top-level names of the program and everything it imports (they all share the global scope)."""
         declared_names(stmts, names)
+        for st in stmts:
+            if st[0] in ("let", "fix", "func", "type"):
+                self.top_decls[st[2]] = self.top_decls.get(st[2], 0) + 1
+            if st[0] == "fix":
+                v = st[3]
+                if v[0] == "neg" and v[1][0] == "lit" and type(v[1][1]) is int:
+                    self.folded[st[2]] = -v[1][1]
+                elif v[0] == "lit" and type(v[1]) is int:
+                    self.folded[st[2]] = v[1]
         for st in self.walk_stmts(stmts):
             if st[0] == "fix":
                 self.fixed.add(st[2])
@@ -201,6 +212,7 @@ class Compiler:
         main = self.load(self.main_path)
         gnames = ["pi", "e"]             # the interpreter predefines these globals
         self.collect_globals(main, os.path.dirname(self.main_path), gnames, {self.main_path})
+        self.folded = {n: v for n, v in self.folded.items() if self.top_decls.get(n) == 1}
         self.gscope = Scope("global", None, gnames)
         self.gscope.global_scope = self.gscope
         body = self.compile_body(main, self.gscope, os.path.dirname(self.main_path), is_global=True)
@@ -385,6 +397,8 @@ class FnCtx:
 
     def read_name(self, name, ind, line, for_call=False):
         cands, fb = self.chain(name)
+        if name in self.c.folded and len(cands) == 1 and cands[0].startswith("vrt_globals"):
+            return self.expr(("lit", self.c.folded[name]), ind)
         miss = f'vrt_fail("I don\'t know a function called \'%s\'", {c_str(name)})' if for_call else f"vrt_unknown({c_str(name)})"
         if not cands:
             if fb:
@@ -415,6 +429,9 @@ class FnCtx:
         cands, _ = self.chain(name)
         if not cands:
             self.out(f"vrt_no_var({c_str(name)});", ind)
+            return
+        if name in self.c.folded and len(cands) == 1 and cands[0].startswith("vrt_globals"):
+            self.out(f"vrt_fixed({c_str(name)});", ind)
             return
         fixed = name in self.c.fixed
         parts = []
@@ -461,6 +478,8 @@ class FnCtx:
                 self.out("vrt_say(VUNDEF);", ind)
             else:
                 self.out(f"vrt_say({self.expr(st[2], ind)});", ind)
+        elif tag == "fix" and self.scope.kind == "global" and st[2] in self.c.folded:
+            pass                   # folded into every use
         elif tag in ("let", "fix"):
             v = self.expr(st[3], ind)
             self.define(st[2], v, ind, fix=(tag == "fix"))
@@ -563,8 +582,16 @@ class FnCtx:
                     self.out("} else {", ind)
                     ind += 1
                     depth += 1
-                v = self.expr(value_node, ind)
-                self.out(f"if (vrt_equal({hold_t}, {v})) {{", ind)
+                if value_node[0] == "anyof":
+                    hit = self.temp()
+                    self.out(f"{hit} = VFALSE;", ind)
+                    for vn in value_node[1]:
+                        v = self.expr(vn, ind)
+                        self.out(f"if (!vrt_truthy({hit}) && vrt_equal({hold_t}, {v})) {hit} = VTRUE;", ind)
+                    self.out(f"if (vrt_truthy({hit})) {{", ind)
+                else:
+                    v = self.expr(value_node, ind)
+                    self.out(f"if (vrt_equal({hold_t}, {v})) {{", ind)
                 first = False
                 self.emit_block(body, ind + 1)
             if st[3]:

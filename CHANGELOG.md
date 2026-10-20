@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.2 (in progress) — features the Emerald port needed
+- **`when` with several values** — `when 2, 3, 5` matches any of them (like several `case`s sharing a body).
+- **Faster native builds with many constants** — `fix NAME be <whole number>` at the top of a module is
+  compiled straight into each use, so programs with thousands of constants build in seconds.
+- **Fix:** native programs that don't use the game runtime link again (the game builtins register
+  themselves at startup instead of relying on a weak symbol, which macOS's linker rejected).
+
 ## 5.1 — native builds + bits and bytes (the game-framework groundwork)
 Vanta programs can now be compiled into real native executables:
 

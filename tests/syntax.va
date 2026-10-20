@@ -58,6 +58,21 @@ assert(size_of(0) is "none", "match first")
 assert(size_of(1) is "one", "match second")
 assert(size_of(42) is "many", "match otherwise")
 
+# one branch for several values
+to kind_of(n)
+    match n
+        when 2, 3, 5, 7
+            give back "small prime"
+        when 4, 6
+            give back "small even"
+        otherwise
+            give back "other"
+    end
+end
+assert(kind_of(5) is "small prime", "when with several values")
+assert(kind_of(6) is "small even", "when with several values, second branch")
+assert(kind_of(9) is "other", "when with several values falls through to otherwise")
+
 # increase / decrease (including on an indexed target)
 let total be 10
 increase total by 5

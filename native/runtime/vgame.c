@@ -464,3 +464,5 @@ V vgame_builtin_named(const char *name) {
     for (const Entry *e = game_table; e->name; e++) if (!strcmp(e->name, name)) return vrt_builtin(e->name, e->fn);
     return VUNDEF;
 }
+extern V (*vrt_extra_builtins)(const char *name);
+__attribute__((constructor)) static void vgame_register(void) { vrt_extra_builtins = vgame_builtin_named; }

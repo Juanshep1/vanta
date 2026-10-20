@@ -764,7 +764,11 @@ def parse_match(lines, pos):
     while pos < len(lines):
         head = first_word(lines[pos][1])
         if head == "when":
-            value = parse_expr_text(lines[pos][1][len("when"):].strip(), lines[pos][0])
+            parts = split_top_level(lines[pos][1][len("when"):].strip(), ",")
+            if len(parts) > 1:      # when 1, 2, 3  -> matches any of them
+                value = ("anyof", [parse_expr_text(p.strip(), lines[pos][0]) for p in parts])
+            else:
+                value = parse_expr_text(lines[pos][1][len("when"):].strip(), lines[pos][0])
             body, pos = parse_block(lines, pos + 1)
             branches.append((value, body))
         elif head == "otherwise":
@@ -1091,7 +1095,11 @@ def _run_stmt(stmt, env):
         _, _, subject_node, branches, else_body = stmt
         subject = eval_expr(subject_node, env)
         for value_node, body in branches:
-            if subject == eval_expr(value_node, env):
+            if value_node[0] == "anyof":
+                hit = any(subject == eval_expr(v, env) for v in value_node[1])
+            else:
+                hit = subject == eval_expr(value_node, env)
+            if hit:
                 run_block(body, env)
                 return
         run_block(else_body, env)
@@ -4628,12 +4636,18 @@ def compile_stmt(stmt):
 
     if tag == "match":
         subj = compile_expr(stmt[2])
-        branches = [(compile_expr(vn), compile_block(b)) for vn, b in stmt[3]]
+        def when_test(vn):
+            if vn[0] == "anyof":
+                parts = [compile_expr(v) for v in vn[1]]
+                return lambda s, env: any(s == p(env) for p in parts)
+            one = compile_expr(vn)
+            return lambda s, env: s == one(env)
+        branches = [(when_test(vn), compile_block(b)) for vn, b in stmt[3]]
         else_body = compile_block(stmt[4])
         def ex(env):
             s = subj(env)
-            for value_node, body in branches:
-                if s == value_node(env):
+            for test, body in branches:
+                if test(s, env):
                     return body(env)
             return else_body(env)
         return ex
