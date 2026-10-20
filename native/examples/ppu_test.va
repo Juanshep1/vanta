@@ -1,0 +1,67 @@
+# A tiny check of the GBA-style video chip: a checkerboard background, a blended stripe, and a sprite.
+game_open("PPU test", 3)
+
+# palette: backdrop dark blue, BG colours, sprite colours (15-bit BGR)
+to rgb15(r, g, b)
+    give back (r >> 3) | ((g >> 3) << 5) | ((b >> 3) << 10)
+end
+pal_set(0, rgb15(20, 24, 48))
+pal_set(1, rgb15(80, 160, 255))
+pal_set(2, rgb15(255, 200, 80))
+pal_set(256 + 1, rgb15(255, 90, 100))
+pal_set(256 + 2, rgb15(255, 255, 255))
+
+# BG tiles at charblock 0: tile 1 = solid colour 1, tile 2 = solid colour 2 (4bpp: 2 pixels per byte)
+let solid1 be bytes(32)
+let solid2 be bytes(32)
+repeat 32 times
+    put_u8(solid1, 0, 0)
+end
+for each i in range(32)
+    change solid1[i] to 0x11
+    change solid2[i] to 0x22
+end
+vram_write(32, solid1)
+vram_write(64, solid2)
+
+# BG0 map at screenblock 31: checkerboard of tiles 1 and 2
+let map be bytes(2048)
+for each ty in range(32)
+    for each tx in range(32)
+        put_u16(map, (ty * 32 + tx) * 2, 1 + ((tx + ty) & 1))
+    end
+end
+vram_write(31 * 0x800, map)
+io_write(0x08, 31 << 8)          # BG0CNT: screenblock 31, charblock 0, 4bpp
+io_write(0x10, 4)                # scroll x by 4 pixels
+
+# a 16x16 sprite (OBJ tiles start at 0x10000): a ring of colour 1 with a white centre
+let spr be bytes(128)
+for each y in range(16)
+    for each x in range(16)
+        let dx be x - 7.5
+        let dy be y - 7.5
+        let d be dx * dx + dy * dy
+        let c be 0
+        if d < 20
+            change c to 2
+        otherwise if d < 60
+            change c to 1
+        end
+        let tile be (y >> 3) * 2 + (x >> 3)
+        let spot be tile * 32 + (y & 7) * 4 + ((x & 7) >> 1)
+        if (x & 1) is 1
+            change spr[spot] to spr[spot] | (c << 4)
+        otherwise
+            change spr[spot] to spr[spot] | c
+        end
+    end
+end
+vram_write(0x10000, spr)
+oam_set(0, 72, (1 << 14) | 112, 0)    # y=72, 16x16, x=112, tile 0
+io_write(0x00, (1 << 6) | (1 << 8) | (1 << 12))   # mode 0, 1D sprites, BG0 + sprites on
+io_write(0x50, (1 << 0) | (2 << 6))               # brighten BG0
+io_write(0x54, 6)
+game_frame()
+game_screenshot("ppu_test.bmp")
+say "frame drawn"

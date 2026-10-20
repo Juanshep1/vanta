@@ -41,6 +41,7 @@ def native_builtins():
 
 
 NATIVE = native_builtins()
+GAME = {n for n in NATIVE if re.search(r'\{"' + n + r'",', open(os.path.join(RUNTIME, "vgame.c")).read())}
 INTERP_ONLY = set(vanta.BUILTINS) - NATIVE
 
 
@@ -938,6 +939,15 @@ def build(path, out=None, run=False, keep_c=False, debug=False, extra_args=None)
     flags = ["-O0", "-g"] if debug else ["-O2"]
     cmd = [cc, *flags, "-std=c11", "-w", "-I", RUNTIME, c_path,
            os.path.join(RUNTIME, "vrt.c"), os.path.join(RUNTIME, "vrt_builtins.c"), "-lm", "-o", out]
+    if comp.used_builtins & GAME:
+        # A game: add the SDL2 video/input runtime.
+        try:
+            sdl = subprocess.run(["sdl2-config", "--cflags", "--libs"], capture_output=True, text=True, check=True).stdout.split()
+        except (OSError, subprocess.CalledProcessError):
+            print("Oops! this program is a game and needs SDL2 (macOS: brew install sdl2; Linux: apt install libsdl2-dev)")
+            sys.exit(1)
+        cmd[-4:-4] = [os.path.join(RUNTIME, "vgame.c")]
+        cmd += sdl
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         print("Oops! the C compiler failed:\n" + r.stderr[-4000:])
