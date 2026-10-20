@@ -56,6 +56,8 @@ static inline V VO(uint32_t t, void *o) { V v = {t, 0, {.o = (VObj *)o}}; return
 
 /* ---- runtime state ---- */
 extern int vrt_line;
+extern const char **vrt_file_names;
+extern int vrt_file_count;
 extern int vrt_argc;
 extern char **vrt_argv;
 

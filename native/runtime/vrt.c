@@ -6,7 +6,9 @@
 #include <stdarg.h>
 #include <math.h>
 
-int vrt_line = 0;
+int vrt_line = 0;              /* (file id << 20) | line */
+const char **vrt_file_names = NULL;
+int vrt_file_count = 0;
 int vrt_argc = 0;
 char **vrt_argv = NULL;
 VTry *vrt_try = NULL;
@@ -31,7 +33,11 @@ _Noreturn void vrt_fail(const char *fmt, ...) {
         longjmp(t->jb, 1);
     }
     fflush(stdout);
-    printf("Oops! line %d: %s\n", vrt_errline, vrt_errmsg);
+    int fid = vrt_errline >> 20, ln = vrt_errline & 0xFFFFF;
+    if (fid > 0 && fid < vrt_file_count)
+        printf("Oops! %s: line %d: %s\n", vrt_file_names[fid], ln, vrt_errmsg);
+    else
+        printf("Oops! line %d: %s\n", ln, vrt_errmsg);
     fflush(stdout);
     exit(1);
 }

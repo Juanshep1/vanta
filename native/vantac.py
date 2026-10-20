@@ -118,6 +118,8 @@ class Scope:
 class Compiler:
     def __init__(self, main_path, debug=False):
         self.main_path = os.path.abspath(main_path)
+        self.file_ids = {self.main_path: 0}   # source file -> id packed into vrt_line (id << 20 | line)
+        self.file_stack = [0]
         self.debug = debug
         self.funcs = []            # C function definitions
         self.protos = []
@@ -232,7 +234,10 @@ class Compiler:
         out += ["static void vanta_main(void);"]
         out += self.funcs
         out += main_fn
+        names = sorted(self.file_ids, key=lambda k: self.file_ids[k])
         init = ["int main(int argc, char **argv) {", "    vrt_init(argc, argv);",
+                "    static const char *FILES[] = {" + ", ".join(c_str(os.path.basename(n)) for n in names) + "};",
+                f"    vrt_file_names = FILES; vrt_file_count = {len(names)};",
                 f"    vrt_globals = vrt_env(NULL, {nslots});"]
         for text, i in self.consts.items():
             b = text.encode("utf-8")
@@ -299,8 +304,11 @@ class Compiler:
         cname = self.new_fn("MOD")
         self.modules[path] = cname
         stmts = self.load(path)
+        self.file_ids.setdefault(path, len(self.file_ids))
+        self.file_stack.append(self.file_ids[path])
         ctx = FnCtx(self, self.gscope, os.path.dirname(path))
         ctx.emit_block(stmts, 1)
+        self.file_stack.pop()
         self.gscope.ntemps_max = max(self.gscope.ntemps_max, ctx.tmax)
         sig = f"static void {cname}(void)"
         self.protos.append(sig + ";")
@@ -470,7 +478,7 @@ class FnCtx:
 
     def stmt(self, st, ind):
         tag, line = st[0], st[1]
-        self.out(f"vrt_line = {line};", ind)
+        self.out(f"vrt_line = {(self.c.file_stack[-1] << 20) | line};", ind)
         if tag == "expr":
             self.expr(st[2], ind)
         elif tag == "say":
