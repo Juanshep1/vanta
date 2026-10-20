@@ -247,7 +247,34 @@ class Compiler:
         init.append(f"    vrt_globals->s[{self.gscope.slots['pi']}] = VF(3.141592653589793);")
         init.append(f"    vrt_globals->s[{self.gscope.slots['e']}] = VF(2.718281828459045);")
         init += ["    vanta_main();", "    fflush(stdout);", "    return 0;", "}"]
+        self.parts = {"main_fn": main_fn, "init": init}
         return "\n".join(out + init) + "\n"
+
+    def split_sources(self, nchunks):
+        """The same program as several C files that compile in parallel: a shared header of declarations,
+        chunks of functions, and a main file with the constants table and main()."""
+        def unstatic(text):
+            return text[len("static "):] if text.startswith("static ") else text
+        header = ['#include "vrt.h"', '#include <stdio.h>', '#include <stdlib.h>', '#include <string.h>', '#include <setjmp.h>',
+                  f"extern V K[{max(1, len(self.consts))}];"]
+        header += [f"extern V BI_{n};" for n in sorted(self.used_builtins)]
+        header += [unstatic(p) for p in self.protos]
+        header += ["void vanta_main(void);"]
+        funcs = [unstatic(f) for f in self.funcs]
+        total = sum(len(f) for f in funcs)
+        chunks, cur, size = [], [], 0
+        for f in funcs:
+            cur.append(f)
+            size += len(f)
+            if size >= total / nchunks and len(chunks) < nchunks - 1:
+                chunks.append(cur)
+                cur, size = [], 0
+        chunks.append(cur)
+        main_lines = ['#include "prog.h"', f"V K[{max(1, len(self.consts))}];"]
+        main_lines += [f"V BI_{n};" for n in sorted(self.used_builtins)]
+        main_lines += [unstatic(l) if i == 0 else l for i, l in enumerate(self.parts["main_fn"])]
+        main_lines += self.parts["init"]
+        return "\n".join(header) + "\n", ["#include \"prog.h\"\n" + "\n".join(c) + "\n" for c in chunks], "\n".join(main_lines) + "\n"
 
     def compile_body(self, stmts, scope, src_dir, is_global=False):
         ctx = FnCtx(self, scope, src_dir)
@@ -972,6 +999,8 @@ def build(path, out=None, run=False, keep_c=False, debug=False, extra_args=None)
         f.write(src)
     cc = os.environ.get("CC", "cc")
     flags = ["-O0", "-g"] if debug else ["-O2"]
+    if len(comp.funcs) > 400 and os.environ.get("VANTA_SPLIT", "1") != "0":
+        return build_split(comp, out, cc, flags, run, keep_c, extra_args, c_path)
     cmd = [cc, *flags, "-std=c11", "-w", "-I", RUNTIME, c_path,
            os.path.join(RUNTIME, "vrt.c"), os.path.join(RUNTIME, "vrt_builtins.c"), "-lm", "-o", out]
     if comp.used_builtins & GAME:
@@ -986,6 +1015,71 @@ def build(path, out=None, run=False, keep_c=False, debug=False, extra_args=None)
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         print("Oops! the C compiler failed:\n" + r.stderr[-4000:])
+        sys.exit(1)
+    if not keep_c:
+        os.remove(c_path)
+    if run:
+        res = subprocess.run([out] + (extra_args or []))
+        sys.exit(res.returncode)
+    return out
+
+
+def build_split(comp, out, cc, flags, run, keep_c, extra_args, c_path):
+    """Big programs: write the C in pieces and compile them on every core at once, then link."""
+    jobs = os.cpu_count() or 4
+    work = out + ".build"
+    os.makedirs(work, exist_ok=True)
+    import fcntl
+    lock = open(os.path.join(work, ".lock"), "w")
+    fcntl.flock(lock, fcntl.LOCK_EX)          # two builds of the same program take turns
+    header, chunks, main_src = comp.split_sources(jobs * 2)
+    files = []
+    def write(name, text):
+        p = os.path.join(work, name)
+        if not (os.path.exists(p) and open(p).read() == text):   # unchanged pieces keep their object file
+            with open(p, "w") as f:
+                f.write(text)
+        return p
+    hdr = write("prog.h", header)
+    for i, c in enumerate(chunks):
+        files.append(write(f"part{i}.c", c))
+    files.append(write("main.c", main_src))
+    runtime = [os.path.join(RUNTIME, "vrt.c"), os.path.join(RUNTIME, "vrt_builtins.c")]
+    link_extra = ["-lm"]
+    if comp.used_builtins & GAME:
+        try:
+            sdl = subprocess.run(["sdl2-config", "--cflags", "--libs"], capture_output=True, text=True, check=True).stdout.split()
+        except (OSError, subprocess.CalledProcessError):
+            print("Oops! this program is a game and needs SDL2 (macOS: brew install sdl2; Linux: apt install libsdl2-dev)")
+            sys.exit(1)
+        runtime.append(os.path.join(RUNTIME, "vgame.c"))
+        link_extra += sdl
+    cflags = [f for f in link_extra if f.startswith("-I") or f.startswith("-D")]
+    pending, objs = [], []
+    hdr_time = os.path.getmtime(hdr)
+    for src_file in files + runtime:
+        obj = os.path.join(work, os.path.basename(src_file)[:-2] + ".o")
+        objs.append(obj)
+        if os.path.exists(obj) and os.path.getmtime(obj) >= max(os.path.getmtime(src_file), hdr_time if src_file in files else 0, os.path.getmtime(os.path.join(RUNTIME, "vrt.h"))):
+            continue
+        cmd = [cc, *flags, "-std=c11", "-w", "-I", RUNTIME, "-I", work, *cflags, "-c", src_file, "-o", obj]
+        pending.append((src_file, cmd))
+    running = []
+    failed = None
+    while pending or running:
+        while pending and len(running) < jobs:
+            src_file, cmd = pending.pop(0)
+            running.append((src_file, subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True)))
+        src_file, proc = running.pop(0)
+        err = proc.communicate()[1]
+        if proc.returncode != 0 and failed is None:
+            failed = err
+    if failed is not None:
+        print("Oops! the C compiler failed:\n" + failed[-4000:])
+        sys.exit(1)
+    r = subprocess.run([cc, *objs, *link_extra, "-o", out], capture_output=True, text=True)
+    if r.returncode != 0:
+        print("Oops! linking failed:\n" + r.stderr[-4000:])
         sys.exit(1)
     if not keep_c:
         os.remove(c_path)

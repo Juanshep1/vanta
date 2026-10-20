@@ -4,6 +4,12 @@
 - **`when` with several values** — `when 2, 3, 5` matches any of them (like several `case`s sharing a body).
 - **Faster native builds with many constants** — `fix NAME be <whole number>` at the top of a module is
   compiled straight into each use, so programs with thousands of constants build in seconds.
+- **Big programs build in parallel** — a large program's C is split into pieces compiled on every core at
+  once, and unchanged pieces are reused: the 40-module Emerald build went from ~2 minutes to ~18 s
+  (4 s when nothing changed).
+- **Errors name the file** — a native runtime error in an imported module says which `.va` file it's in.
+- **All-caps `TRUE`/`FALSE`** are ordinary names now (so ported C code can define them as 1/0);
+  `yes`/`no`/`true`/`false` (lowercase or Capitalized) are still the booleans.
 - **Fix:** native programs that don't use the game runtime link again (the game builtins register
   themselves at startup instead of relying on a weak symbol, which macOS's linker rejected).
 
