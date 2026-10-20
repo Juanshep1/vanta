@@ -7,6 +7,13 @@
 - **Big programs build in parallel** — a large program's C is split into pieces compiled on every core at
   once, and unchanged pieces are reused: the 40-module Emerald build went from ~2 minutes to ~18 s
   (4 s when nothing changed).
+- **iPhone/iPad builds** — `vantac.py game.va --ios -o Game.app [--name N] [--bundle-id ID] [--resources dirs]
+  [--icon png]` compiles a game for iOS, links SDL2 for iOS, writes and signs the app bundle (development
+  identity + provisioning profile). On a phone the game fills the screen with on-screen controls (D-pad,
+  A/B, L/R, Start/Select; multi-touch, slide across the D-pad), a paired game controller works too, the
+  app's Documents folder shows in the Files app for data files, and it adopts the UIScene lifecycle that
+  iOS 26+ requires. `VANTA_TOUCH=1` shows the on-screen controls on a computer.
+- **`list_dir`, `make_dir`, `remove_path`** now work in native builds too.
 - **Errors name the file** — a native runtime error in an imported module says which `.va` file it's in.
 - **All-caps `TRUE`/`FALSE`** are ordinary names now (so ported C code can define them as 1/0);
   `yes`/`no`/`true`/`false` (lowercase or Capitalized) are still the booleans.

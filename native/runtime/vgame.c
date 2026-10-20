@@ -14,12 +14,24 @@
  *   lz77(data, at)                          GBA BIOS LZ77 (0x10) decompression -> bytes
  *   game_screenshot(path)                   save the last frame as a BMP
  *   game_ms()                               milliseconds since start
+ *   audio_open(rate, channels)              sound out: signed 16-bit, 1 or 2 channels (yes if it opened)
+ *   audio_queue(samples)                    queue frames: bytes of little-endian s16 (interleaved) or a list of ints
+ *   audio_queued()                          frames still waiting to be played (0 when headless)
+ *   audio_close()
  */
 #include "vrt.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <SDL.h>
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+#define VGAME_TOUCH 1      /* iPhone/iPad: full screen, on-screen buttons, files next to the app */
+#include <unistd.h>
+void vgame_ios_attach_window(SDL_Window *w);   /* vgame_ios.m: puts the window into the app's UIScene */
+#endif
 
 #define W 240
 #define H 160
@@ -354,6 +366,122 @@ static void render(void) {
 /* ---------------------------------------------------------------- window, input, timing */
 static uint64_t now_ns(void) { return (uint64_t)SDL_GetPerformanceCounter() * 1000000000ull / SDL_GetPerformanceFrequency(); }
 
+/* ---------------------------------------------------------------- on-screen controls (touch devices)
+ * Portrait: the picture fills the width at the top, the buttons sit below it. Landscape: the picture is
+ * centred at full height and the buttons go either side. A held finger counts until it lifts; sliding a
+ * finger across the D-pad changes direction, so it plays like a real pad. */
+typedef struct { float x, y, r; uint32_t bits; int round; } Pad;
+static Pad pads[10];
+static int npads = 0;
+static SDL_Rect game_rect;
+static float dpad_x, dpad_y, dpad_r;
+typedef struct { SDL_FingerID id; float x, y; int on; } Finger;
+static Finger fingers[10];
+static int touch_mode = 0;
+
+static void touch_layout(int w, int h) {
+    npads = 0;
+    float u = (float)(w < h ? w : h);              /* the short side sets the button size */
+    if (h > w) {                                    /* portrait */
+        int gh = w * H / W;
+        int top = (int)(h * 0.07f);
+        game_rect = (SDL_Rect){0, top, w, gh};
+        float area = top + gh, room = h - area;
+        dpad_x = w * 0.26f; dpad_y = area + room * 0.42f; dpad_r = u * 0.17f;
+        pads[npads++] = (Pad){w * 0.84f, area + room * 0.34f, u * 0.085f, 1, 1};          /* A */
+        pads[npads++] = (Pad){w * 0.64f, area + room * 0.47f, u * 0.085f, 2, 1};          /* B */
+        pads[npads++] = (Pad){w * 0.40f, area + room * 0.84f, u * 0.06f, 4, 0};           /* Select */
+        pads[npads++] = (Pad){w * 0.60f, area + room * 0.84f, u * 0.06f, 8, 0};           /* Start */
+        pads[npads++] = (Pad){w * 0.10f, area + room * 0.08f, u * 0.07f, 512, 0};         /* L */
+        pads[npads++] = (Pad){w * 0.90f, area + room * 0.08f, u * 0.07f, 256, 0};         /* R */
+    } else {                                        /* landscape */
+        int gw = h * W / H;
+        if (gw > w * 0.72f) gw = (int)(w * 0.72f);
+        int gh = gw * H / W;
+        game_rect = (SDL_Rect){(w - gw) / 2, (h - gh) / 2, gw, gh};
+        dpad_x = w * 0.11f; dpad_y = h * 0.62f; dpad_r = u * 0.2f;
+        pads[npads++] = (Pad){w * 0.92f, h * 0.55f, u * 0.1f, 1, 1};
+        pads[npads++] = (Pad){w * 0.82f, h * 0.70f, u * 0.1f, 2, 1};
+        pads[npads++] = (Pad){w * 0.08f, h * 0.92f, u * 0.06f, 4, 0};
+        pads[npads++] = (Pad){w * 0.92f, h * 0.92f, u * 0.06f, 8, 0};
+        pads[npads++] = (Pad){w * 0.08f, h * 0.15f, u * 0.08f, 512, 0};
+        pads[npads++] = (Pad){w * 0.92f, h * 0.15f, u * 0.08f, 256, 0};
+    }
+}
+
+static uint32_t touch_bits(void) {
+    uint32_t b = 0;
+    for (int i = 0; i < 10; i++) {
+        if (!fingers[i].on) continue;
+        float fx = fingers[i].x, fy = fingers[i].y;
+        float dx = fx - dpad_x, dy = fy - dpad_y, d2 = dx * dx + dy * dy;
+        if (d2 < dpad_r * dpad_r * 1.6f && d2 > dpad_r * dpad_r * 0.04f) {
+            /* eight directions: a diagonal is two buttons */
+            float ax = dx < 0 ? -dx : dx, ay = dy < 0 ? -dy : dy;
+            if (ax > ay * 0.45f) b |= dx > 0 ? 16 : 32;
+            if (ay > ax * 0.45f) b |= dy > 0 ? 128 : 64;
+            continue;
+        }
+        for (int k = 0; k < npads; k++) {
+            float px = fx - pads[k].x, py = fy - pads[k].y, rr = pads[k].r * 1.35f;
+            if (px * px + py * py < rr * rr) b |= pads[k].bits;
+        }
+    }
+    return b;
+}
+
+static void fill_circle(float cx, float cy, float r, SDL_Color c) {
+    SDL_Vertex v[50];
+    int idx[48 * 3], n = 48;
+    v[0] = (SDL_Vertex){{cx, cy}, c, {0, 0}};
+    for (int i = 0; i <= n; i++) {
+        float t = (float)i / n * 6.2831853f;
+        v[1 + (i % n)] = (SDL_Vertex){{cx + r * SDL_cosf(t), cy + r * SDL_sinf(t)}, c, {0, 0}};
+    }
+    for (int i = 0; i < n; i++) { idx[i * 3] = 0; idx[i * 3 + 1] = 1 + i; idx[i * 3 + 2] = 1 + (i + 1) % n; }
+    SDL_RenderGeometry(ren, NULL, v, n + 1, idx, n * 3);
+}
+
+static void draw_touch_overlay(void) {
+    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+    SDL_Color base = {255, 255, 255, 46}, lit = {255, 255, 255, 120};
+    fill_circle(dpad_x, dpad_y, dpad_r, base);
+    float arm = dpad_r * 0.36f;
+    SDL_Color armc = {255, 255, 255, 70};
+    SDL_SetRenderDrawColor(ren, armc.r, armc.g, armc.b, armc.a);
+    SDL_FRect hbar = {dpad_x - dpad_r * 0.82f, dpad_y - arm / 2, dpad_r * 1.64f, arm};
+    SDL_FRect vbar = {dpad_x - arm / 2, dpad_y - dpad_r * 0.82f, arm, dpad_r * 1.64f};
+    SDL_RenderFillRectF(ren, &hbar);
+    SDL_RenderFillRectF(ren, &vbar);
+    SDL_SetRenderDrawColor(ren, 255, 255, 255, 140);
+    if (keys & 16) { SDL_FRect r = {dpad_x + arm / 2, dpad_y - arm / 2, dpad_r * 0.82f - arm / 2, arm}; SDL_RenderFillRectF(ren, &r); }
+    if (keys & 32) { SDL_FRect r = {dpad_x - dpad_r * 0.82f, dpad_y - arm / 2, dpad_r * 0.82f - arm / 2, arm}; SDL_RenderFillRectF(ren, &r); }
+    if (keys & 64) { SDL_FRect r = {dpad_x - arm / 2, dpad_y - dpad_r * 0.82f, arm, dpad_r * 0.82f - arm / 2}; SDL_RenderFillRectF(ren, &r); }
+    if (keys & 128) { SDL_FRect r = {dpad_x - arm / 2, dpad_y + arm / 2, arm, dpad_r * 0.82f - arm / 2}; SDL_RenderFillRectF(ren, &r); }
+    for (int k = 0; k < npads; k++) {
+        SDL_Color c = (keys & pads[k].bits) ? lit : base;
+        if (pads[k].round) fill_circle(pads[k].x, pads[k].y, pads[k].r, c);
+        else {
+            SDL_SetRenderDrawColor(ren, c.r, c.g, c.b, c.a);
+            SDL_FRect r = {pads[k].x - pads[k].r * 1.3f, pads[k].y - pads[k].r * 0.45f, pads[k].r * 2.6f, pads[k].r * 0.9f};
+            SDL_RenderFillRectF(ren, &r);
+        }
+    }
+}
+
+static void touch_event(SDL_Event *e, int w, int h) {
+    if (e->type != SDL_FINGERDOWN && e->type != SDL_FINGERMOTION && e->type != SDL_FINGERUP) return;
+    int slot = -1, free_slot = -1;
+    for (int i = 0; i < 10; i++) {
+        if (fingers[i].on && fingers[i].id == e->tfinger.fingerId) slot = i;
+        if (!fingers[i].on && free_slot < 0) free_slot = i;
+    }
+    if (e->type == SDL_FINGERUP) { if (slot >= 0) fingers[slot].on = 0; return; }
+    if (slot < 0) slot = free_slot;
+    if (slot < 0) return;
+    fingers[slot] = (Finger){e->tfinger.fingerId, e->tfinger.x * w, e->tfinger.y * h, 1};
+}
+
 static V b_game_open(int argc, V *a) {
     if (argc > 2) vrt_fail("game_open expects a title and an optional scale");
     const char *title = argc >= 1 ? vrt_cs(vrt_display(a[0])) : "Vanta";
@@ -362,12 +490,23 @@ static V b_game_open(int argc, V *a) {
     if (headless) { opened = 1; SDL_Init(SDL_INIT_TIMER); next_frame_ns = now_ns(); return VTRUE; }
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_TIMER) != 0) vrt_fail("couldn't start the window: %s", SDL_GetError());
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+#ifdef VGAME_TOUCH
+    touch_mode = 1;
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "Portrait LandscapeLeft LandscapeRight");
+    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+    win = SDL_CreateWindow(title, 0, 0, 0, 0, SDL_WINDOW_FULLSCREEN | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_BORDERLESS);
+    if (win) vgame_ios_attach_window(win);
+#else
+    if (getenv("VANTA_TOUCH")) touch_mode = 1;     /* try the on-screen buttons on a computer */
     win = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, W * scale, H * scale, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+#endif
     if (!win) vrt_fail("couldn't open a window: %s", SDL_GetError());
     ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!ren) ren = SDL_CreateRenderer(win, -1, 0);
-    SDL_RenderSetLogicalSize(ren, W, H);
-    SDL_RenderSetIntegerScale(ren, SDL_FALSE);
+    if (!touch_mode) {
+        SDL_RenderSetLogicalSize(ren, W, H);
+        SDL_RenderSetIntegerScale(ren, SDL_FALSE);
+    }
     tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, W, H);
     for (int i = 0; i < SDL_NumJoysticks(); i++) if (SDL_IsGameController(i)) { pad = SDL_GameControllerOpen(i); break; }
     opened = 1;
@@ -383,6 +522,7 @@ static void read_input(void) {
             Uint32 f = SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP;
             SDL_SetWindowFullscreen(win, f ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
         } else if (e.type == SDL_CONTROLLERDEVICEADDED && !pad) pad = SDL_GameControllerOpen(e.cdevice.which);
+        else if (touch_mode) { int ow, oh; SDL_GetRendererOutputSize(ren, &ow, &oh); touch_event(&e, ow, oh); }
     }
     const Uint8 *k = SDL_GetKeyboardState(NULL);
     uint32_t b = 0;
@@ -410,6 +550,7 @@ static void read_input(void) {
         int lx = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX), ly = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY);
         if (lx > 16000) b |= 16; if (lx < -16000) b |= 32; if (ly < -16000) b |= 64; if (ly > 16000) b |= 128;
     }
+    if (touch_mode) b |= touch_bits();
     keys = b;
 }
 
@@ -419,8 +560,17 @@ static V b_game_frame(int argc, V *a) {
     render();
     if (!headless) {
         SDL_UpdateTexture(tex, NULL, fb, W * 4);
+        SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
         SDL_RenderClear(ren);
-        SDL_RenderCopy(ren, tex, NULL, NULL);
+        if (touch_mode) {
+            int ow, oh;
+            SDL_GetRendererOutputSize(ren, &ow, &oh);
+            touch_layout(ow, oh);
+            SDL_RenderCopy(ren, tex, NULL, &game_rect);
+            draw_touch_overlay();
+        } else {
+            SDL_RenderCopy(ren, tex, NULL, NULL);
+        }
         SDL_RenderPresent(ren);
         read_input();
         /* pace to the GBA's 59.73 Hz even when vsync is off or faster */
@@ -450,6 +600,94 @@ static V b_game_screenshot(int argc, V *a) {
     return VNIL;
 }
 
+/* ---------------------------------------------------------------- audio
+ * The game mixes its own sound (no sound chip here) and queues one video frame's worth of samples per frame;
+ * SDL resamples to whatever the device wants. Queue policy, device side only: when the device has run dry
+ * (a stall) one chunk of silence goes in first so playback restarts with a little slack, and when more than
+ * 8 chunks are already waiting (the device clock running slow) a chunk is dropped. VANTA_HEADLESS=1: no
+ * device, every call still works and audio_queued() is 0. VANTA_AUDIO_DUMP=out.wav writes exactly what the
+ * game queued to a WAV file, headless or not (the header is kept valid after every write). */
+static SDL_AudioDeviceID adev;
+static int audio_on = 0, audio_rate = 0, audio_chans = 2;
+static FILE *wav;
+static uint32_t wav_bytes = 0;
+
+static void wav_header(void) {
+    uint8_t h[44];
+    uint32_t v;
+    memcpy(h, "RIFF", 4); v = 36 + wav_bytes; memcpy(h + 4, &v, 4); memcpy(h + 8, "WAVEfmt ", 8);
+    v = 16; memcpy(h + 16, &v, 4);
+    uint16_t fmt = 1, ch = (uint16_t)audio_chans, bits = 16, align = (uint16_t)(audio_chans * 2);
+    memcpy(h + 20, &fmt, 2); memcpy(h + 22, &ch, 2);
+    v = (uint32_t)audio_rate; memcpy(h + 24, &v, 4); v = (uint32_t)(audio_rate * audio_chans * 2); memcpy(h + 28, &v, 4);
+    memcpy(h + 32, &align, 2); memcpy(h + 34, &bits, 2);
+    memcpy(h + 36, "data", 4); memcpy(h + 40, &wav_bytes, 4);
+    fseek(wav, 0, SEEK_SET); fwrite(h, 1, 44, wav); fseek(wav, 0, SEEK_END);
+}
+static void audio_shutdown(void) {
+    if (adev) { SDL_CloseAudioDevice(adev); adev = 0; }
+    if (wav) { wav_header(); fclose(wav); wav = NULL; }
+    audio_on = 0;
+}
+static V b_audio_open(int argc, V *a) {
+    if (argc < 1 || argc > 2) vrt_fail("audio_open expects a sample rate and an optional channel count");
+    int rate = (int)ia(a[0], "audio_open"), chans = argc >= 2 ? (int)ia(a[1], "audio_open") : 2;
+    if (rate < 1000 || rate > 192000) vrt_fail("audio_open: %d isn't a usable sample rate", rate);
+    if (chans != 1 && chans != 2) vrt_fail("audio_open: channels must be 1 or 2");
+    if (audio_on) audio_shutdown();
+    audio_rate = rate; audio_chans = chans; audio_on = 1;
+    const char *dump = getenv("VANTA_AUDIO_DUMP");
+    if (dump && *dump) {
+        wav = fopen(dump, "wb");
+        if (!wav) vrt_fail("couldn't write %s", dump);
+        wav_bytes = 0; wav_header();
+    }
+    static int registered = 0;
+    if (!registered) { atexit(audio_shutdown); registered = 1; }
+    if (getenv("VANTA_HEADLESS")) return VTRUE;
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) return VFALSE;
+    SDL_AudioSpec want, have;
+    SDL_zero(want);
+    want.freq = rate; want.format = AUDIO_S16LSB; want.channels = (Uint8)chans; want.samples = 512; want.callback = NULL;
+    adev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);   /* no allowed changes: SDL converts for us */
+    if (!adev) return VFALSE;
+    SDL_PauseAudioDevice(adev, 0);
+    return VTRUE;
+}
+static int16_t audio_tmp[8192];
+static V b_audio_queue(int argc, V *a) {
+    NEED(1, "audio_queue");
+    if (!audio_on) vrt_fail("call audio_open first");
+    const void *data; uint32_t len;
+    if (a[0].t == VT_BYTES) {
+        VBytes *b = AS_BYTES(a[0]);
+        data = b->data; len = (uint32_t)b->len & ~(uint32_t)(audio_chans * 2 - 1);
+    } else if (a[0].t == VT_LIST) {
+        VList *l = AS_LIST(a[0]);
+        int64_t n = l->len - l->len % audio_chans;
+        if (n > (int64_t)(sizeof audio_tmp / 2)) vrt_fail("audio_queue: at most %d samples at a time", (int)(sizeof audio_tmp / 2));
+        for (int64_t i = 0; i < n; i++) {
+            int64_t v = ia(l->items[i], "audio_queue");
+            audio_tmp[i] = (int16_t)(v < -32768 ? -32768 : v > 32767 ? 32767 : v);
+        }
+        data = audio_tmp; len = (uint32_t)(n * 2);
+    } else vrt_fail("audio_queue needs bytes or a list of numbers");
+    if (len == 0) return VNIL;
+    if (wav) { fwrite(data, 1, len, wav); wav_bytes += len; wav_header(); }
+    if (adev) {
+        uint32_t queued = SDL_GetQueuedAudioSize(adev);
+        if (queued == 0) { static uint8_t zeros[16384]; SDL_QueueAudio(adev, zeros, len < sizeof zeros ? len : sizeof zeros); }
+        if (queued <= len * 8) SDL_QueueAudio(adev, data, len);
+    }
+    return VNIL;
+}
+static V b_audio_queued(int argc, V *a) {
+    (void)a; NEED(0, "audio_queued");
+    if (!adev) return VI(0);
+    return VI((int64_t)(SDL_GetQueuedAudioSize(adev) / (uint32_t)(audio_chans * 2)));
+}
+static V b_audio_close(int argc, V *a) { (void)a; NEED(0, "audio_close"); audio_shutdown(); return VNIL; }
+
 typedef struct { const char *name; VBuiltinPtr fn; } Entry;
 static const Entry game_table[] = {
     {"game_open", b_game_open}, {"game_frame", b_game_frame}, {"game_keys", b_game_keys}, {"game_ms", b_game_ms},
@@ -458,6 +696,7 @@ static const Entry game_table[] = {
     {"pal_write", b_pal_write}, {"pal_set", b_pal_set}, {"pal_get", b_pal_get},
     {"oam_set", b_oam_set}, {"oam_write", b_oam_write}, {"affine_set", b_affine_set},
     {"io_write", b_io_write}, {"io_read", b_io_read}, {"lz77", b_lz77},
+    {"audio_open", b_audio_open}, {"audio_queue", b_audio_queue}, {"audio_queued", b_audio_queued}, {"audio_close", b_audio_close},
     {NULL, NULL}
 };
 V vgame_builtin_named(const char *name) {
@@ -465,4 +704,11 @@ V vgame_builtin_named(const char *name) {
     return VUNDEF;
 }
 extern V (*vrt_extra_builtins)(const char *name);
-__attribute__((constructor)) static void vgame_register(void) { vrt_extra_builtins = vgame_builtin_named; }
+__attribute__((constructor)) static void vgame_register(void) {
+    vrt_extra_builtins = vgame_builtin_named;
+#ifdef VGAME_TOUCH
+    /* on a phone the program's data files sit inside the app bundle: run from there */
+    char *base = SDL_GetBasePath();
+    if (base) { if (chdir(base) != 0) {} SDL_free(base); }
+#endif
+}

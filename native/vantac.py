@@ -1095,11 +1095,16 @@ def main():
         print(__doc__)
         sys.exit(1)
     path, out, run, keep, debug, rest = None, None, False, False, False, []
+    ios, ios_opts = False, {"--bundle-id": None, "--name": None, "--resources": "", "--icon": None}
     i = 0
     while i < len(args):
         a = args[i]
         if a == "-o":
             out = args[i + 1]; i += 2; continue
+        if a == "--ios":
+            ios = True; i += 1; continue
+        if a in ios_opts:
+            ios_opts[a] = args[i + 1]; i += 2; continue
         if a == "--run":
             run = True
         elif a == "--keep-c":
@@ -1111,6 +1116,22 @@ def main():
         else:
             rest.append(a)
         i += 1
+    if ios:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import ios_build
+        comp = Compiler(path, debug=debug)
+        try:
+            comp.compile_program()
+        except CompileError as e:
+            print(f"Oops! {e}")
+            sys.exit(1)
+        base = os.path.splitext(os.path.basename(path))[0]
+        name = ios_opts["--name"] or base.capitalize()
+        bundle = ios_opts["--bundle-id"] or "com.vanta." + "".join(ch for ch in base.lower() if ch.isalnum())
+        out_app = out or os.path.join(os.path.dirname(os.path.abspath(path)), name + ".app")
+        ios_build.build_ios(comp, out_app, name, bundle, ios_opts["--resources"].split(","), ios_opts["--icon"],
+                            ["-O0", "-g"] if debug else ["-O2"])
+        return
     build(path, out, run, keep, debug, rest)
 
 

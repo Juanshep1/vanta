@@ -663,6 +663,57 @@ static V b_append_file(int argc, V *a) { return write_mode(argc, a, "a", "append
 static V b_path_exists(int argc, V *a) { NEED(1, "path_exists"); V p = text_of(a[0]); struct stat st; return VB(stat(S(p)->data, &st) == 0); }
 static V b_is_file(int argc, V *a) { NEED(1, "is_file"); V p = text_of(a[0]); struct stat st; return VB(stat(S(p)->data, &st) == 0 && S_ISREG(st.st_mode)); }
 static V b_is_dir(int argc, V *a) { NEED(1, "is_dir"); V p = text_of(a[0]); struct stat st; return VB(stat(S(p)->data, &st) == 0 && S_ISDIR(st.st_mode)); }
+static int cmp_cstr(const void *x, const void *y) { return strcmp(*(char *const *)x, *(char *const *)y); }
+static V b_list_dir(int argc, V *a) {
+    NEED(1, "list_dir");
+    V p = text_of(a[0]);
+    DIR *d = opendir(S(p)->data);
+    if (!d) vrt_fail("could not list directory: %s", S(p)->data);
+    char **names = NULL; int n = 0, cap = 0;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        if (n == cap) { cap = cap ? cap * 2 : 16; names = realloc(names, sizeof(char *) * cap); }
+        names[n++] = strdup(e->d_name);
+    }
+    closedir(d);
+    qsort(names, n, sizeof(char *), cmp_cstr);
+    V out = vrt_list(n);
+    for (int i = 0; i < n; i++) { vrt_list_push(out, vrt_cstr(names[i])); free(names[i]); }
+    free(names);
+    return out;
+}
+static V b_make_dir(int argc, V *a) {
+    NEED(1, "make_dir");
+    V p = text_of(a[0]);
+    char buf[4096]; snprintf(buf, sizeof buf, "%s", S(p)->data);
+    for (char *c = buf + 1; *c; c++) if (*c == '/') { *c = 0; mkdir(buf, 0755); *c = '/'; }
+    mkdir(buf, 0755);
+    return VNIL;
+}
+static void remove_tree(const char *path) {
+    DIR *d = opendir(path);
+    if (d) {
+        struct dirent *e;
+        while ((e = readdir(d))) {
+            if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+            char child[4096]; snprintf(child, sizeof child, "%s/%s", path, e->d_name);
+            struct stat st;
+            if (lstat(child, &st) == 0 && S_ISDIR(st.st_mode)) remove_tree(child); else remove(child);
+        }
+        closedir(d);
+    }
+    rmdir(path);
+}
+static V b_remove_path(int argc, V *a) {
+    NEED(1, "remove_path");
+    V p = text_of(a[0]);
+    struct stat st;
+    if (stat(S(p)->data, &st) != 0) return VNIL;
+    if (S_ISDIR(st.st_mode)) remove_tree(S(p)->data);
+    else remove(S(p)->data);
+    return VNIL;
+}
 static V b_file_size(int argc, V *a) { NEED(1, "file_size"); V p = text_of(a[0]); struct stat st; if (stat(S(p)->data, &st)) vrt_fail("could not read file size: %s", S(p)->data); return VI((int64_t)st.st_size); }
 static V b_now(int argc, V *a) { (void)a; NEED(0, "now"); return VI((int64_t)time(NULL)); }
 static V b_now_ms(int argc, V *a) {
@@ -885,7 +936,7 @@ static const Entry table[] = {
     {"write_bytes", b_write_binary}, {"u8", b_u8}, {"s8", b_s8}, {"u16", b_u16}, {"s16", b_s16}, {"u32", b_u32}, {"s32", b_s32},
     {"put_u8", b_put_u8}, {"put_u16", b_put_u16}, {"put_u32", b_put_u32}, {"band", b_band}, {"bor", b_bor}, {"bxor", b_bxor},
     {"bnot", b_bnot}, {"shift_left", b_shift_left}, {"shift_right", b_shift_right},
-    {"read_file", b_read_file}, {"write_file", b_write_file}, {"append_file", b_append_file}, {"path_exists", b_path_exists},
+    {"read_file", b_read_file}, {"write_file", b_write_file}, {"append_file", b_append_file}, {"path_exists", b_path_exists}, {"list_dir", b_list_dir}, {"make_dir", b_make_dir}, {"remove_path", b_remove_path},
     {"is_file", b_is_file}, {"is_dir", b_is_dir}, {"file_size", b_file_size}, {"now", b_now}, {"now_ms", b_now_ms},
     {"clock", b_clock}, {"sleep", b_sleep}, {"assert", b_assert}, {"fail", b_fail}, {"arguments", b_arguments},
     {"os_name", b_os_name}, {"env", b_env}, {"to_json", b_to_json}, {"from_json", b_from_json},
