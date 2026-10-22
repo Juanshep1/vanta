@@ -11,6 +11,8 @@
  *   pal_write(at, data, [from, [count]])    pal_set(index, rgb15)        pal_get(index)
  *   oam_set(i, attr0, attr1, attr2)         oam_write(at, data, [from, [count]])   affine_set(i, pa, pb, pc, pd)
  *   io_write(reg, value)  io_read(reg)      16-bit display registers by offset (0x00 DISPCNT, 0x08 BG0CNT, ...)
+ *   io_lines(reg, data)                     per-scanline values for one register (like HBlank DMA): data is bytes of
+ *                                           160 little-endian u16s, line y draws with value y; nothing stops it
  *   lz77(data, at)                          GBA BIOS LZ77 (0x10) decompression -> bytes
  *   game_screenshot(path)                   save the last frame as a BMP
  *   game_ms()                               milliseconds since start
@@ -117,6 +119,25 @@ static V b_io_write(int argc, V *a) {
     int64_t r = ia(a[0], "io_write"), v = ia(a[1], "io_write");
     if (r < 0 || r >= 0x60 || (r & 1)) vrt_fail("io_write: register 0x%llx isn't a display register", (long long)r);
     IO(r) = (uint16_t)v;
+    return VNIL;
+}
+/* per-scanline register values (the GBA's HBlank DMA): up to 4 registers at once */
+static int line_reg[4] = {-1, -1, -1, -1};
+static uint16_t line_vals[4][H];
+static V b_io_lines(int argc, V *a) {
+    NEED(2, "io_lines");
+    int64_t r = ia(a[0], "io_lines");
+    if (r < 0 || r >= 0x60 || (r & 1)) vrt_fail("io_lines: register 0x%llx isn't a display register", (long long)r);
+    int slot = -1;
+    for (int k = 0; k < 4; k++) if (line_reg[k] == r) slot = k;
+    if (a[1].t == VT_NIL) { if (slot >= 0) line_reg[slot] = -1; return VNIL; }
+    if (a[1].t != VT_BYTES) vrt_fail("io_lines needs bytes (160 u16 values) or nothing");
+    VBytes *b = AS_BYTES(a[1]);
+    if (b->len < H * 2) vrt_fail("io_lines needs %d bytes, got %lld", H * 2, (long long)b->len);
+    if (slot < 0) for (int k = 0; k < 4; k++) if (line_reg[k] < 0) { slot = k; break; }
+    if (slot < 0) vrt_fail("io_lines: only 4 registers can change per line");
+    line_reg[slot] = (int)r;
+    for (int y = 0; y < H; y++) line_vals[slot][y] = (uint16_t)(b->data[y * 2] | (b->data[y * 2 + 1] << 8));
     return VNIL;
 }
 static V b_io_read(int argc, V *a) {
@@ -320,6 +341,7 @@ static void render(void) {
     int bmode = (bld >> 6) & 3, eva = alpha & 31, evb = (alpha >> 8) & 31, evy = IO(BLDY) & 31;
     if (eva > 16) eva = 16; if (evb > 16) evb = 16; if (evy > 16) evy = 16;
     for (int y = 0; y < H; y++) {
+        for (int k = 0; k < 4; k++) if (line_reg[k] >= 0) IO(line_reg[k]) = line_vals[k][y];
         int bg_on[4] = {0};
         for (int n = 0; n < 4; n++) {
             if (!((disp >> (8 + n)) & 1)) continue;
@@ -695,7 +717,7 @@ static const Entry game_table[] = {
     {"vram_write", b_vram_write}, {"vram_fill", b_vram_fill}, {"vram_read", b_vram_read},
     {"pal_write", b_pal_write}, {"pal_set", b_pal_set}, {"pal_get", b_pal_get},
     {"oam_set", b_oam_set}, {"oam_write", b_oam_write}, {"affine_set", b_affine_set},
-    {"io_write", b_io_write}, {"io_read", b_io_read}, {"lz77", b_lz77},
+    {"io_write", b_io_write}, {"io_read", b_io_read}, {"io_lines", b_io_lines}, {"lz77", b_lz77},
     {"audio_open", b_audio_open}, {"audio_queue", b_audio_queue}, {"audio_queued", b_audio_queued}, {"audio_close", b_audio_close},
     {NULL, NULL}
 };
