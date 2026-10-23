@@ -1,0 +1,22 @@
+# JSON pretty-printing and seeded random numbers (Vanta 6.0) — the same output in native builds.
+let data be {"name": "Vanta", "version": 6, "tags": ["fast", "plain"], "empty": [], "none": {}, "pi": 3.5, "ok": yes, "missing": nothing}
+say to_json(data)
+say to_json(data, 2)
+say to_json([1, [2, 3], {"a": {"b": []}}], 4)
+say to_json("tab\there \"quoted\" é")
+say from_json(to_json(data, 2)) is data
+say to_json([], 2)
+say to_json({}, 0)
+
+random_seed(42)
+let first be [random(1, 100) for each i in range(0, 8)]
+random_seed(42)
+let again be [random(1, 100) for each i in range(0, 8)]
+say first is again
+say first
+say round(random_float(), 6)
+say shuffle([1, 2, 3, 4, 5, 6])
+say pick(["red", "green", "blue"])
+random_seed(0)
+say random(1, 1000000)
+say "json/random tests passed"

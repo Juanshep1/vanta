@@ -1,0 +1,93 @@
+# Operator methods: a type decides what +, -, *, /, %, is, <, [], text() and length() mean for it.
+type Money
+    has cents
+    to add(other)
+        give back new Money(me.cents + other.cents)
+    end
+    to subtract(other)
+        give back new Money(me.cents - other.cents)
+    end
+    to multiply(n)
+        give back new Money(me.cents * n)
+    end
+    to divide(n)
+        give back new Money(round(me.cents / n))
+    end
+    to remainder(n)
+        give back new Money(me.cents % n)
+    end
+    to negate()
+        give back new Money(0 - me.cents)
+    end
+    to equals(other)
+        give back me.cents is other.cents
+    end
+    to less_than(other)
+        give back me.cents is under other.cents
+    end
+    to text()
+        give back "$" + format(me.cents / 100, ".2")
+    end
+end
+
+let a be new Money(250)
+let b be new Money(199)
+say a + b
+say a - b
+say a * 3
+say a / 2
+say a % 100
+say -a
+say a is Money(250)
+say a is not b
+say b < a
+say a > b
+say a <= Money(250)
+say a >= Money(300)
+say "price: " + a
+say "{b} each"
+say text(a)
+say [a, b]
+say sort([a, b, Money(5)])
+say max(a, b)
+say Money(1) is in [Money(2), Money(1)]
+
+type Grid
+    has cells
+    has width
+    to index(i)
+        give back me.cells[i[1] * me.width + i[0]]
+    end
+    to set_index(i, value)
+        change me.cells[i[1] * me.width + i[0]] to value
+    end
+    to length()
+        give back length(me.cells)
+    end
+    to contains(value)
+        give back value is in me.cells
+    end
+end
+let g be new Grid([0, 0, 0, 0, 0, 0], 3)
+change g[[1, 1]] to 7
+say g[[1, 1]]
+say g.cells
+say length(g)
+say 7 is in g
+say 9 is in g
+
+# without the methods, the old errors stay
+type Plain
+    has x
+end
+attempt
+    say Plain(1) + Plain(2)
+rescue problem
+    say problem
+end
+attempt
+    say Plain(1) < Plain(2)
+rescue problem
+    say problem
+end
+say Plain(1) is Plain(1)

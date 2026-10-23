@@ -1,0 +1,61 @@
+# shared (type-level) values and methods; inheritance chains and super.
+type Point
+    has x
+    has y
+    shared made be 0
+    shared to origin()
+        give back new Point(0, 0)
+    end
+    shared to count()
+        give back Point.made
+    end
+    to setup(x, y)
+        change me.x to x
+        change me.y to y
+        change Point.made to Point.made + 1
+    end
+end
+let p be Point.origin()
+say p
+say Point(1, 2)
+say Point.made
+say Point.count()
+
+type Animal
+    has name
+    shared kingdom be "animals"
+    to describe()
+        give back me.name + " is an animal"
+    end
+    to sound()
+        give back "..."
+    end
+end
+type Dog from Animal
+    to describe()
+        give back super.describe() + " and a dog"
+    end
+    to sound()
+        give back "woof"
+    end
+end
+type Puppy from Dog
+    to describe()
+        give back super.describe() + " and a puppy"
+    end
+end
+let pup be new Puppy("Rex")
+say pup.describe()
+say pup.sound()
+say pup is a Puppy
+say pup is a Dog
+say pup is an Animal
+say Dog("x") is a Puppy
+say Puppy.kingdom
+change Dog.kingdom to "dogs and others"
+say Animal.kingdom
+attempt
+    say Point.nothing_here
+rescue problem
+    say problem
+end

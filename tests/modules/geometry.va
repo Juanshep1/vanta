@@ -1,0 +1,31 @@
+# A module used by tests/modules.va: plain names are exported, `private` ones stay inside.
+private fix secret be 42
+let unit be "cm"
+let made be 0
+
+to area(r)
+    give back round(pi * r * r, 2)
+end
+
+private to helper(x)
+    give back x * 2
+end
+
+to double_it(x)
+    give back helper(x)
+end
+
+to count_one()
+    change made to made + 1
+    give back made
+end
+
+type Circle
+    has radius
+    to area()
+        give back area(me.radius)
+    end
+    to show()
+        give back "Circle({me.radius}{unit})"
+    end
+end

@@ -63,8 +63,13 @@ git clone https://github.com/Juanshep1/vanta.git
 cd vanta
 ./vanta run examples/hello.va     # run a program
 ./vanta repl                      # start the interactive REPL
-./vanta version                   # 5.0
+./vanta test                      # run the test blocks in tests/
+./vanta fmt --check .             # is the code formatted the standard way?
+./vanta version                   # 6.0
 ```
+
+Every command (`run`, `repl`, `debug`, `build`, `test`, `check`, `fmt`, `doc`, `new`, `get`,
+`lsp`) is documented in [docs/TOOLS.md](docs/TOOLS.md); `./vanta help` lists them.
 
 `./vanta program.va` works too, and so does `python3 vanta.py program.va` if you
 don't want to use the launcher. Put the `vanta` directory on your `PATH` and you
@@ -87,6 +92,37 @@ Live: **https://juanshep1.github.io/vanta/ide/** — or locally:
 python3 -m http.server 8000     # from the repo root
 # open http://localhost:8000/ide/
 ```
+
+## Games and apps — the canvas
+
+Vanta programs can open a window and draw: shapes, text (a pixel font or TrueType),
+images, sprite sheets, tile maps, a camera, keyboard/mouse/controller/touch input and
+sound. Write `update(dt)` and `draw()` (or `on_frame()`) and they run at 60 fps:
+
+```
+window(640, 400, "Bounce")
+let x be 320
+let speed be 200
+
+to update(dt)
+    change x to x + speed * dt
+    if x < 20 or x > 620
+        change speed to -speed
+        beep(660, 0.05)
+    end
+end
+
+to draw()
+    clear("#101018")
+    circle(x, 200, 20, "orange")
+end
+```
+
+`vanta run bounce.va` builds it natively (needs SDL2) and opens the window; it also
+builds for iPhone/iPad. `lib/game.va` adds vectors, collisions, physics, timers, tweens
+and particles, and `lib/gui.va` adds buttons, sliders and text fields for desktop apps.
+`examples/games/` has Pong, Snake, a platformer, Breakout, a paint program, a calculator
+and a to-do app. Everything is in [docs/GRAPHICS.md](docs/GRAPHICS.md).
 
 ## Vanta Pocket — the iOS app
 
@@ -446,6 +482,7 @@ The `examples/` folder has a working program for each feature:
 | `errors.va` | `attempt` / `rescue` and `fail` |
 | `using_lib.va` | importing the bundled standard library |
 | `guess.va` | a number-guessing game |
+| `os/hello_kernel.va`, `os/clock_kernel.va`, `os/vantaos.va` | operating systems in Vanta: they boot on a PC (or QEMU) with nothing underneath — build with `python3 native/vantac.py examples/os/vantaos.va --kernel -o out/vantaos.elf`, run with `qemu-system-x86_64 -kernel out/vantaos.elf` (see [`docs/KERNEL.md`](docs/KERNEL.md)) |
 
 There's also a longer write-up in [`docs/LANGUAGE_GUIDE.md`](docs/LANGUAGE_GUIDE.md).
 

@@ -1,0 +1,165 @@
+# Concurrency (Vanta 6.0): tasks, channels, locks, run_parallel.
+
+to slow_double(x)
+    sleep(0.2)
+    give back x * 2
+end
+
+# three sleeping tasks overlap, so this takes about 0.2 s, not 0.6 s
+let t0 be now_ms()
+let tasks be [start slow_double(1), start slow_double(2), start slow_double(3)]
+say wait for tasks
+say now_ms() - t0 < 500
+say type_of(tasks[0])
+say tasks[0]
+say is_done(tasks[0])
+
+# spawn is the function form of 'start'
+let t be spawn(slow_double, 21)
+say wait(t)
+
+# wait with a timeout gives back nothing if the task isn't done yet
+let slow be start slow_double(5)
+say wait(slow, 0.01)
+say is_done(slow)
+say wait(slow)
+
+# errors inside a task come out where you wait for it
+to boom(msg)
+    fail(msg)
+end
+attempt
+    wait for start boom("kaboom")
+rescue e
+    say "caught: " + e
+end
+
+# ---- channels ----
+let ch be channel()
+to producer(c, n)
+    for each i in range(1, n + 1)
+        send i * i to c
+    end
+    close(c)
+end
+start producer(ch, 5)
+let got be []
+let v be receive from ch
+while v is not nothing
+    add v to got
+    change v to receive from ch
+end
+say got
+say receive(ch)
+attempt
+    send 1 to ch
+rescue e
+    say e
+end
+
+# a bounded channel makes a fast producer wait for the consumer
+let small be channel(1)
+to counter_task(c)
+    repeat 5 times
+        send "tick" to c
+    end
+    give back "done sending"
+end
+let ct be start counter_task(small)
+let ticks be 0
+repeat 5 times
+    receive(small)
+    increase ticks by 1
+end
+say ticks
+say wait for ct
+
+# receive with a timeout
+say receive(channel(), 0.05)
+
+# fan-in: several workers report on one channel
+let results be channel()
+to worker(id, out)
+    sleep(0.01 * id)
+    send "worker " + id to out
+end
+for each id in range(1, 4)
+    start worker(id, results)
+end
+let reports be []
+repeat 3 times
+    add receive from results to reports
+end
+say sort(reports)
+
+# nothing else running: waiting forever is an error, not a hang
+attempt
+    receive(channel())
+rescue e
+    say e
+end
+
+# ---- locks ----
+let counter be 0
+to bump()
+    repeat 500 times
+        lock
+            change counter to counter + 1
+        end
+    end
+end
+wait for [start bump(), start bump(), start bump(), start bump()]
+say counter
+
+let account be {"balance": 100}
+let guard be new_lock()
+to withdraw(amount)
+    lock guard
+        if account["balance"] < amount
+            give back "refused"
+        end
+        sleep(0.01)
+        change account["balance"] to account["balance"] - amount
+        give back "ok"
+    end
+end
+say sort(wait for [start withdraw(60), start withdraw(60)])
+say account["balance"]
+say type_of(guard)
+
+# a failing block still lets go of the lock
+attempt
+    lock guard
+        fail("inside the lock")
+    end
+rescue e
+    say e
+end
+lock guard
+    say "lock is free again"
+end
+
+# ---- run_parallel: CPU work on every core ----
+to square(x)
+    give back x * x
+end
+say run_parallel(square, range(1, 11))
+say run_parallel(square, [3], 4)
+say run_parallel(square, [])
+to describe(x)
+    give back {"n": x, "text": text(x), "even": x % 2 is 0}
+end
+say run_parallel(describe, [1, 2], 2)
+to bad(x)
+    if x is 3
+        fail("three is bad")
+    end
+    give back x
+end
+attempt
+    run_parallel(bad, [1, 2, 3, 4], 2)
+rescue e
+    say e
+end
+
+say "concurrency tests passed"

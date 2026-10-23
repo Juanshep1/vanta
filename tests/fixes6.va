@@ -1,0 +1,35 @@
+# 6.0 fixes: fixed names stay fixed, increase/decrease need numbers, escapes, reserved words, ask at end of input.
+fix limit be 10
+attempt
+    let limit be 2
+rescue problem
+    say problem
+end
+say limit
+to shadow()
+    let limit be 3
+    give back limit
+end
+say shadow()
+let n be 1
+attempt
+    increase n by "a"
+rescue problem
+    say problem
+end
+let word be "ab"
+attempt
+    increase word by 1
+rescue problem
+    say problem
+end
+decrease n by 0.5
+say n
+say "a\b" + " " + length("a\b")
+say "tab:\t|"
+say length("\d+")
+attempt
+    ask "name?" into who
+rescue problem
+    say problem
+end

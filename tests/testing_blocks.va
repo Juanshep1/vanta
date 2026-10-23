@@ -1,0 +1,39 @@
+# Test blocks: `vanta test tests/testing_blocks.va` runs them; `vanta run` skips them.
+
+to add(a, b)
+    give back a + b
+end
+
+to safe_divide(a, b)
+    if b is 0
+        fail("can't divide by zero")
+    end
+    give back a / b
+end
+
+say "testing_blocks loaded"
+
+test "adds numbers"
+    expect add(2, 2) is 4
+    expect add(2, 2) is not 5
+    expect add(-1, 1) is 0
+end
+
+test "comparisons and membership"
+    expect add(2, 3) is at least 5
+    expect add(2, 3) is under 6
+    expect 3 is in [1, 2, 3]
+    expect [1, 2, 3] contains 2
+    expect "hello world" contains "world"
+    expect {"name": "Ada"} contains "name"
+end
+
+test "errors"
+    expect safe_divide(1, 0) fails
+    expect safe_divide(1, 0) fails with "zero"
+    expect safe_divide(6, 3) is 2
+end
+
+test "plain conditions"
+    expect length("abc") is 3 and add(1, 1) is 2
+end

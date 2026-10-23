@@ -1,0 +1,376 @@
+# BOLT'S JUMP - a little platformer. All the art is made right here in code:
+# the robot is pixel art written as text, the tiles are drawn with rectangles.
+#
+# Left/Right (or A/D) run, Space / Up / W jumps (hold it to jump higher).
+# Collect the coins, stomp the slimes, reach the flag.
+#
+#   vanta run examples/games/platformer.va
+
+import "game"
+
+window(480, 256, "Bolt's Jump", {"pixel_art": yes})
+
+fix tile be 16
+fix gravity be 1500
+fix run_speed be 140
+fix jump_speed be 430
+
+# ------------------------------------------------------------------ art
+# The robot: four 16x16 frames side by side - standing, two walking steps, jumping.
+let robot be image_from_rows("""
+    .......k...............k...............k...............k........
+    .......y...............y...............y...............y........
+    .......k...............k...............k...............k........
+    ....kkkkkkkk........kkkkkkkk........kkkkkkkk........kkkkkkkk....
+    ...kggggggggk......kggggggggk......kggggggggk......kggggggggk...
+    ...kgccccccgk......kgccccccgk......kgccccccgk......kgccccccgk...
+    ...kgcwccwcgk......kgcwccwcgk......kgcwccwcgk......kgcwccwcgk...
+    ...kgccccccgk......kgccccccgk......kgccccccgk......kgccccccgk...
+    ...kggggggggk......kggggggggk......kggggggggk......kggggggggk...
+    ....kkkkkkkk........kkkkkkkk........kkkkkkkk........kkkkkkkk....
+    ...kooooooook......kooooooook......kooooooook.....kkoooooooook..
+    ..kgkooyyookgk....kgkooyyookgk....kgkooyyookgk...kgkooyyooookgk.
+    ..kgkooooookgk....kgkooooookgk....kgkooooookgk....k.oooooooo.k..
+    ...kooooooook......kooooooook......kooooooook......kooooooook...
+    ....kk....kk.......kk......kk........kk..kk.........kk..kk......
+    ...kkk....kkk.....kkk.......kk.......kkk.kkk.......kkk..kkk.....
+""", {"k": "#1b1b2a", "g": "#9aa3b5", "c": "#4de8ff", "w": "#ffffff", "o": "#f08a24", "y": "#ffe14d"})
+sprite_sheet(robot, 16, 16)
+
+# The tiles, drawn into an image: 0 grass, 1 dirt, 2 bricks, 3 spikes, 4 stone
+let tiles be make_image(tile * 5, tile)
+draw_to(tiles)
+# 0: grass on dirt
+rect(0, 0, 16, 16, "#8a5a32")
+rect(0, 0, 16, 5, "#5ec44a")
+rect(0, 5, 16, 1, "#3f9a35")
+for each p in [[2, 8], [9, 11], [13, 7], [5, 13], [11, 14]]
+    rect(p[0], p[1], 2, 1, "#6e4526")
+end
+# 1: dirt
+rect(16, 0, 16, 16, "#8a5a32")
+for each p in [[3, 3], [10, 5], [6, 9], [13, 12], [2, 13], [8, 1]]
+    rect(16 + p[0], p[1], 2, 1, "#6e4526")
+end
+# 2: bricks
+rect(32, 0, 16, 16, "#c0602e")
+color("#7a3516")
+rect(32, 7, 16, 1)
+rect(32, 15, 16, 1)
+rect(39, 0, 1, 7)
+rect(35, 8, 1, 7)
+rect(43, 8, 1, 7)
+rect(32, 0, 16, 1, "#e08850")
+# 3: spikes
+for each i in range(0, 4)
+    triangle(48 + i * 4, 16, 50 + i * 4, 6, 52 + i * 4, 16, "#c9ced8")
+    line(50 + i * 4, 6, 50 + i * 4, 15, "#ffffff80")
+end
+# 4: stone
+rect(64, 0, 16, 16, "#6b7080")
+outline_rect(64, 0, 16, 16, "#4b4f5c")
+rect(66, 2, 5, 3, "#868c9c")
+rect(72, 9, 5, 3, "#868c9c")
+draw_to_screen()
+sprite_sheet(tiles, tile, tile)
+
+# ------------------------------------------------------------------ the level
+#  # grass   d dirt   b bricks   x stone   ^ spikes   o coin   s slime   P start   F flag
+let level be """
+    ..........................................................................................
+    ..........................................................................................
+    ..........................................................................................
+    ..........................................................................................
+    ..........................................o.o.o...........................................
+    ......................................bbbbbbbbbb..........................................
+    ...............ooo........................................ooo.............................
+    ..............bbbbb.................................x....bbbbb..................ooo........
+    ......................ooo..........................xx.........................bbbbb.....F..
+    .....................bbbbb.....o.o................xxx...................................x..
+    ..........................................s......xxxx...........s.......................x..
+    ..P.....o.o.o.........................######....xxxxx.......########......o.o.o.........x..
+    ######################...###########..dddddd...xxxxxx.....##dddddddd##...#########...#####
+    dddddddddddddddddddddd^^^ddddddddddd^^dddddd^^^dddddd^^^^^dddddddddddd^^^ddddddddd^^^ddddd
+    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+"""
+
+let grid be []          # tile numbers for draw_tilemap (-1 = empty)
+let solid be []         # yes/no for each cell
+let coins be []         # [x, y, taken]
+let slimes be []        # Body objects
+let start_x be 32
+let start_y be 160
+let flag_x be 0
+let flag_y be 0
+let rows_text be keep(make r give length(trim(r)) > 0, split(level, "\n"))
+for each r, line_text in rows_text
+    let row_tiles be []
+    let row_solid be []
+    for each c, ch in trim(line_text)
+        let t be -1
+        match ch
+            when "#"
+                change t to 0
+            when "d"
+                change t to 1
+            when "b"
+                change t to 2
+            when "^"
+                change t to 3
+            when "x"
+                change t to 4
+            when "o"
+                add [c * tile + 8, r * tile + 8, no] to coins
+            when "s"
+                let s be new Body(c * tile, r * tile + 4, 14, 12)
+                change s.vx to -40
+                add s to slimes
+            when "P"
+                change start_x to c * tile
+                change start_y to r * tile
+            when "F"
+                change flag_x to c * tile
+                change flag_y to r * tile
+        end
+        add t to row_tiles
+        let is_wall be t is 0 or t is 1 or t is 2 or t is 4
+        add is_wall to row_solid
+    end
+    add row_tiles to grid
+    add row_solid to solid
+end
+let level_w be length(grid[0]) * tile
+let level_h be length(grid) * tile
+
+to is_solid(cx, cy)
+    if cy < 0 or cy >= length(solid) or cx < 0 or cx >= length(solid[0])
+        give back cx < 0 or cx >= length(solid[0])     # the level's sides are walls
+    end
+    give back solid[cy][cx]
+end
+
+# the solid tiles around a body, as rectangles, for move_and_collide
+to solids_near(b)
+    let out be []
+    for each cy in range(floor(b.y / tile) - 1, floor((b.y + b.h) / tile) + 2)
+        for each cx in range(floor(b.x / tile) - 1, floor((b.x + b.w) / tile) + 2)
+            if is_solid(cx, cy)
+                add new Rect(cx * tile, cy * tile, tile, tile) to out
+            end
+        end
+    end
+    give back out
+end
+
+to tile_at(px, py)
+    let cx be floor(px / tile)
+    let cy be floor(py / tile)
+    if cy < 0 or cy >= length(grid) or cx < 0 or cx >= length(grid[0])
+        give back -1
+    end
+    give back grid[cy][cx]
+end
+
+# ------------------------------------------------------------------ the player
+let player be new Body(start_x + 3, start_y, 10, 15)
+let facing be 1
+let coyote be 0            # a moment after leaving a ledge when you can still jump
+let walk be animation([1, 2], 10)
+let score be 0
+let lives be 3
+let won be no
+let hurt_timer be 0
+let cam_x be 0
+let fx be particles(500)
+
+to respawn()
+    change player.x to start_x + 3
+    change player.y to start_y
+    change player.vx to 0
+    change player.vy to 0
+    change hurt_timer to 1
+end
+
+to update(dt)
+    fx.update(dt)
+    walk.update(dt)
+    change hurt_timer to max(0, hurt_timer - dt)
+    if won
+        if key_pressed("space") or key_pressed("enter")
+            change won to no
+            change score to 0
+            change lives to 3
+            for each c in coins
+                change c at 2 to no
+            end
+            respawn()
+        end
+        give back nothing
+    end
+
+    # running: accelerate toward the target speed, slide to a stop
+    let want be 0
+    if key_down("left") or key_down("a")
+        change want to -run_speed
+        change facing to -1
+    end
+    if key_down("right") or key_down("d")
+        change want to run_speed
+        change facing to 1
+    end
+    change player.vx to approach(player.vx, want, 900 * dt)
+
+    # jumping
+    if player.on_ground
+        change coyote to 0.1
+    otherwise
+        change coyote to max(0, coyote - dt)
+    end
+    let jump be key_pressed("space") or key_pressed("up") or key_pressed("w") or key_pressed("z")
+    if jump and coyote > 0
+        change player.vy to -jump_speed
+        change coyote to 0
+        beep(520, 0.08, "square", 0.25)
+    end
+    let holding be key_down("space") or key_down("up") or key_down("w") or key_down("z")
+    if not holding and player.vy < -150
+        change player.vy to -150          # let go early for a small hop
+    end
+
+    player.apply_gravity(gravity, dt, 600)
+    player.move_and_collide(solids_near(player), dt)
+
+    # spikes and falling off
+    if tile_at(player.center_x(), player.y + player.h - 2) is 3 or player.y > level_h
+        lose_life()
+    end
+
+    # coins
+    for each c in coins
+        if not c[2] and circle_rect_overlap(c[0], c[1], 6, player.x, player.y, player.w, player.h)
+            change c at 2 to yes
+            increase score by 10
+            fx.burst(c[0], c[1], 12, "#ffe14d", 90, 0.5)
+            beep(1320, 0.07, "square", 0.25)
+        end
+    end
+
+    # slimes walk back and forth; land on one to squash it
+    let alive be []
+    for each s in slimes
+        let before be s.vx
+        s.apply_gravity(gravity, dt, 600)
+        s.move_and_collide(solids_near(s), dt)
+        let ahead be s.x - 1 if before < 0 otherwise s.x + s.w + 1
+        if s.hit_wall or not is_solid(floor(ahead / tile), floor((s.y + s.h + 2) / tile))
+            change s.vx to -before
+        otherwise
+            change s.vx to before
+        end
+        if rects_overlap(player, s) and hurt_timer is 0
+            if player.vy > 0 and player.y + player.h - s.y < 10
+                change player.vy to -300
+                increase score by 50
+                fx.burst(s.center_x(), s.center_y(), 20, "#7be36b", 140, 0.6)
+                beep(200, 0.12, "triangle")
+                skip
+            end
+            lose_life()
+        end
+        add s to alive
+    end
+    change slimes to alive
+
+    if player.x + player.w > flag_x and player.y < flag_y + 64 and not won
+        change won to yes
+        fx.burst(flag_x + 8, flag_y, 60, random_color(), 200, 1.2)
+        beep(660, 0.1)
+    end
+
+    # the camera follows the player, staying inside the level
+    let target be clamp(player.center_x() - 240, 0, level_w - 480)
+    change cam_x to smooth_follow(cam_x, target, 8, dt)
+end
+
+to lose_life()
+    if hurt_timer > 0
+        give back nothing
+    end
+    decrease lives by 1
+    beep(110, 0.3, "saw", 0.3)
+    fx.burst(player.center_x(), player.center_y(), 25, "#ff6b6b", 160, 0.7)
+    if lives <= 0
+        change lives to 3
+        change score to 0
+        for each c in coins
+            change c at 2 to no
+        end
+    end
+    respawn()
+end
+
+to draw_background()
+    # sky bands, then two rows of hills that scroll slower than the level (parallax)
+    for each i in range(0, 9)
+        rect(0, i * 20, 480, 20, mix_color("#5b8cff", "#bfe3ff", i / 8))
+    end
+    rect(0, 180, 480, 76, "#bfe3ff")
+    for each i in range(-1, 8)
+        let hx be i * 90 - (cam_x * 0.2) % 90
+        circle(hx + 45, 230, 70, "#9fd0a8")
+    end
+    for each i in range(-1, 10)
+        let hx be i * 60 - (cam_x * 0.45) % 60
+        circle(hx + 30, 250, 45, "#7bbf85")
+    end
+end
+
+to draw()
+    draw_background()
+    camera(floor(cam_x), 0)
+    draw_tilemap(tiles, grid, 0, 0)
+    # flag
+    rect(flag_x + 7, flag_y - 48, 2, 64, "#e8e8f0")
+    triangle(flag_x + 9, flag_y - 48, flag_x + 26, flag_y - 41, flag_x + 9, flag_y - 34, "#ff4d6d")
+    # coins spin by getting thinner and wider
+    for each c in coins
+        if not c[2]
+            let w be abs(sin(game_time() * 4 + c[0] * 0.1)) * 5 + 1
+            ellipse(c[0], c[1], w, 6, "#ffd23f")
+            ellipse(c[0], c[1], max(0, w - 2), 4, "#fff1a8")
+        end
+    end
+    # slimes
+    for each s in slimes
+        let squish be sin(game_time() * 10 + s.x) * 1.5
+        ellipse(s.center_x(), s.y + s.h - 5 - squish / 2, 8 + squish, 6 - squish / 2, "#5fd35a")
+        rect(s.center_x() - 4, s.y + 3, 2, 3, "#103010")
+        rect(s.center_x() + 2, s.y + 3, 2, 3, "#103010")
+    end
+    # the robot (blinks while it's safe after a hit)
+    if hurt_timer is 0 or floor(hurt_timer * 12) % 2 is 0
+        let f be 0
+        if not player.on_ground
+            change f to 3
+        otherwise if abs(player.vx) > 10
+            change f to walk.frame()
+        end
+        draw_frame(robot, f, player.x - 3, player.y - 1, {"flip_x": facing < 0})
+    end
+    fx.draw()
+    no_camera()
+    # the HUD
+    round_rect(6, 6, 150, 20, 6, "#00000060")
+    draw_text("SCORE {score}", 12, 12, 8, "white")
+    for each i in range(0, lives)
+        draw_frame(robot, 0, 100 + i * 17, 6, {"scale": 0.75})
+    end
+    if won
+        round_rect(110, 90, 260, 80, 10, "#000000a0")
+        text_align("center")
+        draw_text("YOU MADE IT!", 240, 108, 16, "#ffe14d")
+        draw_text("score {score} - space to play again", 240, 140, 8, "white")
+        text_align("left")
+    end
+end

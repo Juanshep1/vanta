@@ -1,0 +1,15 @@
+tests/check/bad.va:8: 'greet' should give back text, but this is a number
+tests/check/bad.va:12: 'label' should be text, but this is a number
+tests/check/bad.va:13: 'r' of area should be a number, but this is text
+tests/check/bad.va:14: 'area' takes 1 value(s), but got 2
+tests/check/bad.va:15: 'greet' is missing a value for 'name'
+tests/check/bad.va:16: 'greet' has no value named 'mood'
+tests/check/bad.va:17: 'scroe' is not defined (did you mean 'score'?)
+tests/check/bad.va:18: 'totl' doesn't exist yet (use: let totl be ...)
+tests/check/bad.va:19: 'limit' is fixed and can't be changed
+tests/check/bad.va:20: the module 'geometry' has no 'nope'
+tests/check/bad.va:21: 'secret' is private to the module 'geometry'
+tests/check/bad.va:22: the kind Color has no value 'purple' (it has red, green)
+tests/check/bad.va:30: Point expects 2 value(s) (x, y), but got 1
+tests/check/bad.va:31: there is no function called 'helper'
+tests/check/bad.va: 14 problems found

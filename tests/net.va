@@ -1,0 +1,168 @@
+# Networking (Vanta 6.0): TCP and UDP sockets, DNS, the HTTP server with routes, and the HTTP client.
+# Everything talks to this machine only (127.0.0.1) on ports the OS picks, so it runs fast and offline.
+
+# ---- TCP: an echo server running as a task ----
+let server be tcp_listen(0, "127.0.0.1")
+let port be socket_info(server)["local_port"]
+assert(port > 0, "the OS picked a port")
+
+to echo_once(srv)
+    let conn be accept(srv)
+    let line be read_line(conn)
+    while line is not nothing
+        if line is "bye"
+            send "goodbye\n" to conn
+            stop
+        end
+        send uppercase(line) + "\n" to conn
+        change line to read_line(conn)
+    end
+    close(conn)
+    give back "served"
+end
+
+let job be start echo_once(server)
+let client be tcp_connect("127.0.0.1", port, 2)
+send "hello\n" to client
+say read_line(client)
+write_to(client, "second line\r\n")
+say read_line(client)
+send "bye\n" to client
+say read_line(client)
+say read_line(client)
+close(client)
+say wait for job
+close(server)
+say type_of(client)
+
+# a timeout on accept gives back nothing
+let quiet be tcp_listen(0, "127.0.0.1")
+say accept(quiet, 0.05)
+close(quiet)
+
+# connecting to a closed port fails cleanly
+attempt
+    let s be tcp_connect("127.0.0.1", port)
+    say "connected?"
+rescue e
+    say starts_with(e, "could not connect to 127.0.0.1:")
+end
+
+# ---- raw bytes ----
+let bsrv be tcp_listen(0, "127.0.0.1")
+to send_bytes(srv)
+    let c be accept(srv)
+    send bytes([1, 2, 3, 250]) to c
+    close(c)
+end
+start send_bytes(bsrv)
+let bc be tcp_connect("127.0.0.1", socket_info(bsrv)["local_port"])
+let got be receive_bytes(bc, 10)
+say got
+say length(got)
+close(bc)
+close(bsrv)
+
+# ---- UDP ----
+let u1 be udp_open(0, "127.0.0.1")
+let u2 be udp_open(0, "127.0.0.1")
+udp_send(u2, "127.0.0.1", socket_info(u1)["local_port"], "ping")
+let msg be udp_receive(u1, 1024, 2)
+say msg["data"]
+say msg["port"] is socket_info(u2)["local_port"]
+say udp_receive(u1, 1024, 0.05)
+close(u1)
+close(u2)
+
+# ---- DNS ----
+say contains(dns_lookup("localhost"), "127.0.0.1") or contains(dns_lookup("localhost"), "::1")
+say dns_lookup("127.0.0.1")
+
+# ---- HTTP server with routes + the HTTP client ----
+make_dir(env("TMPDIR", "/tmp") + "/vanta_www")
+write_file(env("TMPDIR", "/tmp") + "/vanta_www/hello.txt", "static hello")
+
+to home(req)
+    give back "<h1>home</h1>"
+end
+to show_user(req)
+    give back json_response({"id": req["params"]["id"], "q": get(req["query"], "q", "none")})
+end
+to add_item(req)
+    give back {"status": 201, "body": {"got": req["json"]["name"], "method": req["method"]}}
+end
+to broken(req)
+    fail("handler broke")
+end
+to moved(req)
+    give back redirect("/")
+end
+
+let routes be {"GET /": home, "GET /users/:id": show_user, "POST /items": add_item, "/broken": broken}
+change routes["/old"] to moved
+change routes["GET /static/*"] to env("TMPDIR", "/tmp") + "/vanta_www"
+let web be start_server(0, routes)
+let base be "http://127.0.0.1:" + server_port(web)
+
+let r be http_get(base + "/")
+say r["status"]
+say r["body"]
+say r["headers"]["Content-Type"]
+let u be http_get(base + "/users/42?q=hi%20there")
+say from_json(u["body"])
+let p be http_post(base + "/items", {"name": "lamp"})
+say p["status"]
+say from_json(p["body"])
+say http_get(base + "/nope")["status"]
+let b be http_get(base + "/broken")
+say b["status"]
+say contains(b["body"], "handler broke")
+say http_get(base + "/old")["body"]
+say http_get(base + "/static/hello.txt")["body"]
+say http_get(base + "/static/../secret")["status"]
+say http_request("DELETE", base + "/users/1")["status"]
+say from_json(http_request("GET", base + "/users/7", nothing, {"X-Test": "1"})["body"])["id"]
+
+# a plain function handler sees the whole request
+to echo_req(req)
+    give back req["method"] + " " + req["path"] + " " + text(req["query"]) + " " + req["body"]
+end
+let web2 be start_server(0, echo_req)
+say http_post("http://127.0.0.1:" + server_port(web2) + "/a/b?x=1&x=2", "data")["body"]
+stop_server(web2)
+
+# ---- WebSockets: a "WS /path" route and ws_connect ----
+to chat(ws, req)
+    send "welcome " + req["params"]["room"] to ws
+    let msg be receive(ws)
+    while msg is not nothing
+        if is_bytes(msg)
+            send bytes([length(msg)]) to ws
+        otherwise
+            send "echo: " + msg to ws
+        end
+        change msg to receive(ws)
+    end
+end
+change routes["WS /chat/:room"] to chat
+let web3 be start_server(0, routes)
+let ws be ws_connect("ws://127.0.0.1:" + server_port(web3) + "/chat/lobby")
+say type_of(ws)
+say receive(ws)
+send "hi there" to ws
+say receive(ws)
+send repeat_text("long ", 40) to ws
+say length(receive(ws))
+send bytes([9, 8, 7]) to ws
+say receive(ws)
+say receive(ws, 0.05)
+close(ws)
+attempt
+    ws_connect("ws://127.0.0.1:" + server_port(web3) + "/nope")
+rescue e
+    say starts_with(e, "websocket handshake failed")
+end
+stop_server(web3)
+stop_server(web)
+remove_path(env("TMPDIR", "/tmp") + "/vanta_www")
+say "net tests passed"

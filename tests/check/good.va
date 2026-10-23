@@ -1,0 +1,24 @@
+# a program with no problems
+import "../modules/geometry.va" as geo
+from "../modules/geometry.va" use Circle
+to area(r: number) -> number
+    give back pi * r * r
+end
+to total(xs...)
+    give back sum(xs)
+end
+type Point
+    has x
+    has y
+end
+let p be Point(1, 2)
+let name: text be "Ana"
+say area(2) + total(1, 2, 3) + p.x + geo.area(1)
+say Circle(2)
+for each i, v in [1, 2]
+    say [k * 2 for each k in range(v)]
+end
+match [1, 2]
+    when [a, rest...]
+        say a + length(rest)
+end

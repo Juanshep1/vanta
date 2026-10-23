@@ -1,0 +1,10 @@
+# hello_kernel.va — the smallest operating system you can write in Vanta.
+#
+# Build it and boot it in QEMU (no real computer needed):
+#   python3 native/vantac.py examples/os/hello_kernel.va --kernel -o out/hello.elf
+#   qemu-system-x86_64 -kernel out/hello.elf
+#
+# There is no Windows, macOS or Linux underneath: this program IS the operating system.
+
+say "Hello from Vanta!"
+halt()

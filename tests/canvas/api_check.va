@@ -1,0 +1,108 @@
+# Checks the canvas API by reading pixels back (run natively and headless by tools/canvas_headless.py).
+window(100, 80, "check")
+
+to expect(what, got, want)
+    if got is not want
+        fail("{what}: got {got}, wanted {want}")
+    end
+end
+
+clear("black")
+expect("clear", get_pixel(5, 5), "#000000")
+rect(10, 10, 20, 10, "red")
+expect("rect inside", get_pixel(15, 15), "#ff0000")
+expect("rect right edge is outside", get_pixel(30, 15), "#000000")
+color("#00ff00")
+pixel(50, 50)
+expect("pixel", get_pixel(50, 50), "#00ff00")
+circle(70, 20, 8, "blue")
+expect("circle centre", get_pixel(70, 20), "#0000ff")
+expect("outside the circle", get_pixel(70, 30), "#000000")
+rect(0, 60, 10, 10, "#ffffff80")
+expect("half-transparent white on black", get_pixel(5, 65), "#808080")
+expect("rgb", rgb(255, 136, 0), "#ff8800")
+expect("rgba", rgba(255, 136, 0, 128), "#ff880080")
+expect("named colour", rgb(255, 255, 255), "#ffffff")
+expect("hsv", hsv(120, 1, 1), "#00ff00")
+expect("mix_color", mix_color("black", "white", 0.5), "#808080")
+expect("with_alpha", with_alpha("red", 0.5), "#ff000080")
+expect("screen size", "{screen_width()}x{screen_height()}", "100x80")
+expect("pixel font width", text_width("abc", 8), 24)
+expect("pixel font 16", text_width("abc", 16), 48)
+
+# images, drawing into them, flipping
+let img be make_image(4, 2, "transparent")
+draw_to(img)
+rect(0, 0, 2, 2, "yellow")
+draw_to_screen()
+expect("image size", "{image_width(img)}x{image_height(img)}", "4x2")
+expect("image pixel", image_pixel(img, 0, 0), "#ffff00")
+expect("image transparent", image_pixel(img, 3, 0), "#00000000")
+clear("black")
+draw_image(img, 40, 40, {"scale": 2})
+expect("scaled image", get_pixel(41, 41), "#ffff00")
+expect("scaled image clear part", get_pixel(46, 41), "#000000")
+draw_image(img, 40, 50, {"flip_x": yes})
+expect("flipped image", get_pixel(43, 50), "#ffff00")
+expect("flipped image clear part", get_pixel(40, 50), "#000000")
+let sprite be image_from_rows("""
+    r.
+    .b
+""", {"r": "red", "b": "blue"})
+draw_image(sprite, 0, 0)
+expect("image_from_rows", get_pixel(0, 0) + get_pixel(1, 1) + get_pixel(1, 0), "#ff0000#0000ff#000000")
+sprite_sheet(img, 2, 2)
+expect("frames", frames_in(img), 2)
+clear("black")
+draw_tilemap(img, [[0, 1], [1, 0]], 0, 0)
+expect("tilemap tile 0", get_pixel(0, 0), "#ffff00")
+expect("tilemap tile 1 is empty", get_pixel(2, 0), "#000000")
+expect("tilemap row 2", get_pixel(2, 2), "#ffff00")
+
+# camera and clipping
+clear("black")
+camera(10, 0)
+rect(10, 0, 5, 5, "white")
+no_camera()
+expect("camera offset", get_pixel(0, 0), "#ffffff")
+clip(0, 0, 50, 80)
+rect(40, 0, 20, 5, "red")
+no_clip()
+expect("clipped away", get_pixel(55, 2), "#000000")
+expect("inside clip", get_pixel(45, 2), "#ff0000")
+
+# scripted input: frame numbers count from the window opening
+test_input("down space")
+expect("not yet", key_down("space"), no)
+let frames be 0
+while next_frame()
+    increase frames by 1
+    if frames is 1
+        expect("key held", key_down("space"), yes)
+        expect("just pressed", key_pressed("space"), yes)
+        test_input("up space")
+    end
+    if frames is 2
+        expect("released", key_released("space"), yes)
+        test_input("click 30 40")
+    end
+    if frames is 3
+        expect("mouse x", mouse_x(), 30)
+        expect("mouse pressed", mouse_pressed(), yes)
+        test_input("type hi!")
+    end
+    if frames is 4
+        expect("mouse released", mouse_released(), yes)
+        expect("typed", text_input(), "hi!")
+        stop
+    end
+end
+expect("frames", frames, 4)
+
+let s be make_tone(440, 0.5)
+expect("tone length", sound_length(s), 0.5)
+let v be play_sound(s)
+expect("playing", sound_playing(v), yes)
+stop_sound(v)
+expect("stopped", sound_playing(v), no)
+say "canvas api ok"

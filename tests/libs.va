@@ -1,0 +1,143 @@
+# The 6.0 standard modules written in Vanta: collections, strings, cli, log.
+import "collections"
+import "strings"
+import "cli"
+import "log"
+
+# ---- collections ----
+let s be Stack()
+s.push(1)
+s.push(2)
+s.push(3)
+say s
+say s.pop()
+say s.peek()
+say s.size()
+say s.to_list()
+
+let q be Queue()
+for each i in range(1, 6)
+    q.push(i)
+end
+say q.pop()
+say q.pop()
+say q.peek()
+say q.size()
+say q
+repeat 40 times
+    q.push("x")
+    q.pop()
+end
+say q.size()
+
+let d be Deque()
+d.push_back(2)
+d.push_back(3)
+d.push_front(1)
+d.push_front(0)
+say d
+say d.pop_back()
+say d.pop_front()
+say d.peek_front()
+say d.peek_back()
+say d.pop_front()
+say d.pop_front()
+say d.is_empty()
+attempt
+    d.pop_back()
+rescue e
+    say e
+end
+
+let h be Heap()
+for each x in [5, 1, 8, 3, 9, 2]
+    h.push(x)
+end
+say h.peek()
+say h.to_list()
+say [h.pop(), h.pop(), h.pop()]
+to longer_first(a, b)
+    give back length(a) > length(b)
+end
+let words_heap be Heap(longer_first)
+for each w in ["a", "abcd", "ab", "abc"]
+    words_heap.push(w)
+end
+say words_heap.pop()
+
+let pq be PriorityQueue()
+pq.push("write report", 2)
+pq.push("fix bug", 1)
+pq.push("lunch", 3)
+pq.push("fix typo", 1)
+say [pq.pop(), pq.pop(), pq.pop(), pq.pop()]
+say pq.is_empty()
+
+say count_items(["a", "b", "a", "c", "a"])
+to parity(n)
+    give back "even" if n % 2 is 0 otherwise "odd"
+end
+say group_by(parity, [1, 2, 3, 4, 5])
+
+# ---- strings ----
+say words("  the quick\tbrown\nfox ")
+say "[" + center("hi", 6) + "]"
+say center("hi", 7, "*")
+say wrap("the quick brown fox jumps over the lazy dog", 10)
+say truncate("a long sentence here", 10)
+say indent("a\nb", "> ")
+say dedent("    one\n      two\n    three")
+say is_blank("  \t ")
+say is_digits("2026")
+say [is_letters("hello"), is_letters("abc1"), is_letters("")]
+say reverse_text("stressed")
+say count_of("banana", "an")
+say between("key=[value] rest", "[", "]")
+say strip_prefix("unhappy", "un")
+say strip_suffix("file.txt", ".txt")
+say squeeze("  too    many   spaces ")
+say snake_case("Hello big World")
+say kebab_case("parseHTTPRequest now")
+say camel_case("make it camel")
+say slugify("Hello, World! 2026")
+say fill_template("Hi {{name}}, you are {{age}}. {{unknown}}", {"name": "Ana", "age": 30})
+
+# ---- cli ----
+let spec be {"verbose": no, "count": 1, "name": "World", "output": "-"}
+let opts be parse_args(["--verbose", "-c", "3", "--name=Ana", "file1", "--", "--not-an-option"], spec)
+say opts
+say parse_args(["--no-verbose", "x"], {"verbose": yes})["verbose"]
+say parse_args(["-h"], spec)["help"]
+attempt
+    parse_args(["--colour", "red"], spec)
+rescue e
+    say e
+end
+attempt
+    parse_args(["--count", "lots"], spec)
+rescue e
+    say e
+end
+attempt
+    parse_args(["--name"], spec)
+rescue e
+    say e
+end
+say arg_usage("greet", {"verbose": no, "name": "World", "number": 2})
+
+# ---- log ----
+log_show_time(no)
+log_info("starting")
+log_debug("hidden at info level")
+log_level("debug")
+log_debug("now visible")
+log_warn("careful")
+log_level("error")
+log_warn("hidden again")
+log_error("broken")
+log_quiet(yes)
+log_error("only in history")
+say length(log_lines())
+say last(log_lines())
+
+say "libs tests passed"

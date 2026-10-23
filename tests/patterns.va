@@ -1,0 +1,81 @@
+# Taking values apart in match/when.
+to describe(value)
+    match value
+        when []
+            give back "an empty list"
+        when [only]
+            give back "just " + only
+        when [0, y]
+            give back "starts with zero, then {y}"
+        when [first, rest...]
+            give back "first {first}, then {length(rest)} more: {rest}"
+        when {"name": n, "age": a} if a is at least 18
+            give back "{n}, an adult"
+        when {"name": n}
+            give back "someone called {n}"
+        when a Circle with radius
+            give back "a circle of radius {radius}"
+        when a Shape
+            give back "some other shape"
+        when a number
+            give back "the number {value}"
+        when a text
+            give back "the text {value}"
+        when a Color
+            give back "the color {value}"
+        otherwise
+            give back "something else"
+    end
+end
+
+type Shape
+    has name
+end
+type Circle from Shape
+    has radius
+    to setup(r)
+        change me.name to "circle"
+        change me.radius to r
+    end
+end
+type Square from Shape
+    has side
+end
+kind Color is red, green
+
+say describe([])
+say describe([5])
+say describe([0, 9])
+say describe([1, 2, 3])
+say describe({"name": "Ana", "age": 30})
+say describe({"name": "Bo", "age": 9})
+say describe(new Circle(2))
+say describe(new Square("sq", 4))
+say describe(42)
+say describe("hi")
+say describe(Color.green)
+say describe(yes)
+
+# plain values still compare like before, and when [1, 2] still means that exact list
+match [1, 2]
+    when [1, 2]
+        say "exactly [1, 2]"
+end
+let point be [3, 4]
+match point
+    when [x, y] if x is y
+        say "diagonal"
+    when [x, _]
+        say "x is {x}"
+end
+say x
+# names bound by a pattern work after the match
+to sum_list(xs)
+    match xs
+        when []
+            give back 0
+        when [head, tail...]
+            give back head + sum_list(tail)
+    end
+end
+say sum_list([1, 2, 3, 4])

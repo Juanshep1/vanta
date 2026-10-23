@@ -1,0 +1,47 @@
+{
+  "name": "vanta-language",
+  "displayName": "Vanta",
+  "description": "Vanta language support: syntax highlighting, errors as you type, completion, hover docs, go-to-definition and formatting (via `vanta lsp`).",
+  "version": "6.0.0",
+  "publisher": "vanta-lang",
+  "license": "MIT",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Programming Languages", "Formatters", "Linters"],
+  "main": "./extension.js",
+  "activationEvents": ["onLanguage:vanta"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "vanta",
+        "aliases": ["Vanta", "vanta"],
+        "extensions": [".va"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      { "language": "vanta", "scopeName": "source.vanta", "path": "./syntaxes/vanta.tmLanguage.json" }
+    ],
+    "configuration": {
+      "title": "Vanta",
+      "properties": {
+        "vanta.path": {
+          "type": "string",
+          "default": "vanta",
+          "description": "The vanta command (or the full path to the vanta launcher / vanta.py)."
+        },
+        "vanta.languageServer.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run `vanta lsp` for diagnostics, completion, hover, go-to-definition and formatting."
+        }
+      }
+    },
+    "commands": [
+      { "command": "vanta.run", "title": "Vanta: Run This File" },
+      { "command": "vanta.test", "title": "Vanta: Run Tests In This File" }
+    ]
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

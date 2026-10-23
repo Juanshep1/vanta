@@ -1,0 +1,158 @@
+# CALCULATOR - a desktop app built with the gui library (lib/gui.va).
+# Click the buttons, or type: digits, + - * /, Enter for =, Backspace, Escape clears.
+#
+#   vanta run examples/games/calculator.va
+
+import "gui"
+
+window(320, 480, "Calculator")
+
+let shown be "0"           # what the display shows
+let stored be nothing      # the number before the operator
+let pending be nothing     # the operator waiting for its second number
+let fresh be yes           # the next digit starts a new number
+let history be ""
+
+to as_text(n)
+    if is_number(n) and floor(n) is n and abs(n) < 1000000000000000
+        give back text(floor(n))
+    end
+    give back text(round(n, 10))
+end
+
+to apply(a, op, b)
+    match op
+        when "+"
+            give back a + b
+        when "-"
+            give back a - b
+        when "x"
+            give back a * b
+        when "/"
+            if b is 0
+                give back nothing
+            end
+            give back a / b
+    end
+    give back b
+end
+
+to press(k)
+    if k is "C"
+        change shown to "0"
+        change stored to nothing
+        change pending to nothing
+        change fresh to yes
+        change history to ""
+    otherwise if k is "<"
+        if not fresh and length(shown) > 1
+            change shown to shown[0:length(shown) - 1]
+        otherwise
+            change shown to "0"
+            change fresh to yes
+        end
+    otherwise if k is "+/-"
+        if shown is not "0" and shown is not "Error"
+            change shown to shown[1:length(shown)] if starts_with(shown, "-") otherwise "-" + shown
+        end
+    otherwise if k is "%"
+        change shown to as_text(number(shown) / 100)
+    otherwise if k is "."
+        if fresh
+            change shown to "0."
+            change fresh to no
+        otherwise if not contains(shown, ".")
+            change shown to shown + "."
+        end
+    otherwise if k is "+" or k is "-" or k is "x" or k is "/" or k is "="
+        if shown is "Error"
+            give back nothing
+        end
+        let value be number(shown)
+        if pending is not nothing and not fresh
+            let result be apply(stored, pending, value)
+            if result is nothing
+                change shown to "Error"
+                change pending to nothing
+                change fresh to yes
+                give back nothing
+            end
+            change history to as_text(stored) + " " + pending + " " + as_text(value) + " ="
+            change value to result
+            change shown to as_text(result)
+        end
+        change stored to value
+        change pending to nothing if k is "=" otherwise k
+        if k is not "="
+            change history to as_text(value) + " " + k
+        end
+        change fresh to yes
+    otherwise
+        # a digit
+        if fresh or shown is "0" or shown is "Error"
+            change shown to k
+            change fresh to no
+        otherwise if length(shown) < 16
+            change shown to shown + k
+        end
+    end
+end
+
+to keyboard()
+    for each ch in text_input()
+        if contains("0123456789.+-/%", ch)
+            press(ch)
+        otherwise if ch is "*" or ch is "x"
+            press("x")
+        otherwise if ch is "="
+            press("=")
+        end
+    end
+    if key_pressed("enter")
+        press("=")
+    end
+    if key_repeated("backspace")
+        press("<")
+    end
+    if key_pressed("escape")
+        press("C")
+    end
+end
+
+to on_frame()
+    keyboard()
+    gui_background()
+
+    # the display
+    round_rect(16, 16, 288, 110, 12, gui_color("field"))
+    text_align("right")
+    draw_text(history, 290, 30, 16, gui_color("dim"))
+    let size be 44 if length(shown) <= 10 otherwise 28
+    draw_text(shown, 290, 116 - text_height(size), size, gui_color("text"))
+    text_align("left")
+
+    # the keys: four columns, the last row has a wide 0
+    layout(16, 142, 288, 8)
+    for each keys in [["C", "+/-", "%", "/"], ["7", "8", "9", "x"], ["4", "5", "6", "-"], ["1", "2", "3", "+"]]
+        row(56, 4)
+        for each k in keys
+            if k is "/" or k is "x" or k is "-" or k is "+"
+                if accent_button(k, cell())
+                    press(k)
+                end
+            otherwise if button(k, cell())
+                press(k)
+            end
+        end
+    end
+    row(56, 4)
+    if button("0", cell(2))
+        press("0")
+    end
+    if button(".", cell())
+        press(".")
+    end
+    if accent_button("=", cell())
+        press("=")
+    end
+end

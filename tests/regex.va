@@ -1,0 +1,92 @@
+# Regular expressions: matches, find_all, replace_all, regex_search, regex_split, regex_escape.
+# Remember: in Vanta text "\\d" is the two characters \d, and "{{" / "}}" are literal braces.
+
+# matches
+assert(matches("abc123", "[0-9]+"), "matches finds digits")
+assert(not matches("abc", "\\d"), "no digits")
+assert(matches("Hello", "(?i)^hello$"), "inline ignore-case flag")
+assert(matches("line one\nline two", "(?m)^line two$"), "multiline anchors")
+assert(not matches("a\nb", "a.b"), "dot skips newline")
+assert(matches("a\nb", "(?s)a.b"), "dotall flag")
+assert(matches("abc\n", "c$"), "dollar before a final newline")
+assert(not matches("abc\n", "c\\Z"), "\\Z is the very end")
+say matches(42, "^4")
+
+# find_all
+say find_all("a1b22c333", "\\d+")
+say find_all("abc", "x*")
+say find_all("<a><b>", "<.*?>")
+say find_all("<a><b>", "<.*>")
+say find_all("héllo wörld", "\\w+")
+say find_all("The cat sat on the mat", "\\b\\w")
+say find_all("2024-01-15 and 1999-12-31", "(\\d{{4}})-(\\d{{2}})")
+say find_all("aaaaa", "a{{2,3}}")
+say find_all("aaaaa", "a{{2,3}}?")
+say find_all("foobar foobaz", "foo(?=bar)")
+say find_all("xbar ybar", "(?<!x)bar")
+say find_all("word word other other x", "(\\w+) \\1")
+say find_all("日本語 テキスト", "\\w+")
+assert(length(find_all("", "a*")) is 1, "one empty match in empty text")
+
+# replace_all
+say replace_all("a1b22", "\\d+", "#")
+say replace_all("john smith", "(\\w+) (\\w+)", "\\2 \\1")
+say replace_all("john smith", "(?P<first>\\w+) (?P<last>\\w+)", "\\g<last>, \\g<first>")
+say replace_all("2024-01-15", "(\\d+)-(\\d+)-(\\d+)", "\\3/\\2/\\1")
+say replace_all("abxd", "x*", "-")
+say replace_all("a b c", " ", "\\t")
+say replace_all("aaa", "a", "\\g<0>\\g<0>")
+say replace_all("ab", "(a)|b", "[\\1]")
+say replace_all("héllo wörld", "ö", "oe")
+assert(replace_all("hello", "l+", "") is "heo", "replace with nothing")
+
+# regex_search
+let m be regex_search("price: $42.50 today", "\\$(\\d+)\\.(\\d+)")
+say m
+assert(m["start"] is 7, "start position")
+assert(m["groups"][0] is "42", "first group")
+say regex_search("héllo wörld", "w\\w+")
+say regex_search("abcd", "(a)(x)?(c)?")
+say regex_search("abc", "\\d")
+let n be regex_search("hello", "(?P<first>h)(?P<rest>.*)")
+say n["groups"]
+
+# regex_split
+say regex_split("one, two;three  four", "[,; ]+")
+say regex_split("a1b2c", "(\\d)")
+say regex_split("a-b_c", "(-)|(_)")
+say regex_split("axbc", "x*")
+say regex_split("héllo wörld", "\\s")
+
+# regex_escape
+say regex_escape("a.b*c (1) [2] {{3}}")
+say regex_escape("hello world_123")
+assert(matches("1+1=2", regex_escape("1+1")), "escaped pattern matches literally")
+
+# lazy, possessive, atomic, backreference, conditional, unicode classes
+say find_all("aaa", "a+?")
+say matches("aaa", "^a*+a$")
+say find_all("aab ab", "(?>a+)b")
+say find_all("abab xyxy abxy", "(?P<p>\\w\\w)(?P=p)")
+say find_all("ab b", "(a)?(?(1)b|b)")
+say find_all("١٢٣ 456", "\\d+")
+say find_all("ÀÉÎ àéî", "(?i)àéî")
+
+# errors
+attempt
+    say find_all("abc", "(unclosed")
+rescue e
+    say starts_with(e, "that pattern is not valid")
+end
+attempt
+    say replace_all("abc", "(b)", "\\5")
+rescue e
+    say starts_with(e, "that pattern is not valid")
+end
+attempt
+    say matches("abc")
+rescue e
+    say e
+end
+
+say "regex tests passed"

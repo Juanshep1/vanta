@@ -1,0 +1,77 @@
+# Named values in calls, collecting the rest with name..., and text formatting.
+to greet(name, greeting be "Hello", mark be "!")
+    give back greeting + ", " + name + mark
+end
+say greet("Ana")
+say greet(name: "Ana")
+say greet("Bo", mark: "?")
+say greet(mark: ".", name: "Cy", greeting: "Hi")
+
+to total(numbers...)
+    let t be 0
+    for each n in numbers
+        increase t by n
+    end
+    give back t
+end
+say total()
+say total(1, 2, 3)
+
+to label(prefix, items...)
+    give back prefix + ": " + join(items, ", ")
+end
+say label("fruit", "apple", "pear")
+
+type Dog
+    has name
+    has sound
+end
+let d be new Dog(sound: "Woof", name: "Rex")
+say d
+
+attempt
+    say greet(nmae: "x")
+rescue problem
+    say problem
+end
+attempt
+    say greet("a", name: "b")
+rescue problem
+    say problem
+end
+attempt
+    say Dog(name: "Rex")
+rescue problem
+    say problem
+end
+attempt
+    say length(text: "x")
+rescue problem
+    say problem
+end
+
+# formatting: {value:spec}
+let price be 3.14159
+say "{price:.2}"
+say "{price:.0}"
+say "[{42:5}]"
+let word be "hi"
+say "[{word:5}]"
+say "[{word:>5}]"
+say "[{word:^6}]"
+say "[{word:*<6}]"
+say "{1234567:,}"
+say "{1234567.891:,.2}"
+say "{7:03}"
+say "{-7:05}"
+say "{255:x} {255:X} {5:b} {8:o}"
+say "{0.256:%} {0.256:.1%}"
+say "{12345.678:e} {12345.678:.2e}"
+let long_word be "abcdef"
+say "{long_word:.3}"
+say format(2 / 3, ".3")
+say format(10, "08.2")
+let items be ["tea", "cake"]
+for each i, item in items
+    say "{i + 1:2}. {item:<6}|"
+end

@@ -1,0 +1,25 @@
+# Optional type notes: they document intent and `vanta check` reads them; running ignores them.
+to area(r: number) -> number
+    give back pi * r * r
+end
+to greet(name: text, punct: text be "!") -> text
+    give back "Hi " + name + punct
+end
+to total(numbers: number...) -> number
+    give back sum(numbers)
+end
+let label: text be "circle"
+let size: number, count: number be 2, 3
+fix limit: number be 10
+type Person
+    has name: text
+    has age: number
+    to older(years: number) -> Person
+        give back new Person(me.name, me.age + years)
+    end
+end
+say round(area(2), 3)
+say greet("Ana")
+say total(1, 2, 3)
+say label + " " + size + " " + count + " " + limit
+say Person("Bo", 40).older(2)

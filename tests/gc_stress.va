@@ -1,0 +1,41 @@
+# Lots of garbage while generators, modules and sets are alive (checks the native collector keeps them).
+import "modules/geometry.va" as geo
+to squares()
+    let i be 0
+    while yes
+        let junk be [i, i, i, "x" + i]
+        yield i * i
+        increase i by 1
+    end
+end
+let g be squares()
+let total be 0
+let seen be set()
+repeat 200000 times
+    let v be next(g)
+    increase total by v % 7
+    add v % 1000 to seen
+    let garbage be {"a": [v, v], "b": text(v)}
+end
+say total
+say length(seen)
+say geo.area(2)
+say next(g)
+to chain(n)
+    for each x in squares()
+        if x is over n
+            give back
+        end
+        attempt
+            yield [x, text(x)]
+        rescue problem
+            say problem
+        end
+    end
+end
+let count be 0
+for each pair in chain(4000000)
+    increase count by 1
+    let more be [pair, pair, pair]
+end
+say count

@@ -1,0 +1,144 @@
+# Generators: a function that uses `yield` hands out values one at a time.
+to count_up(start, stop_at)
+    let n be start
+    while n is at most stop_at
+        yield n
+        increase n by 1
+    end
+end
+
+for each n in count_up(1, 3)
+    say n
+end
+say list(count_up(5, 8))
+say [n * n for each n in count_up(1, 4) if n % 2 is 0]
+
+# an endless generator is fine as long as you stop asking
+to naturals()
+    let n be 0
+    while yes
+        yield n
+        increase n by 1
+    end
+end
+for each n in naturals()
+    if n is over 4
+        stop
+    end
+    say "natural {n}"
+end
+
+let g be count_up(1, 2)
+say g
+say type_of(g)
+say next(g)
+say next(g)
+say next(g, "done")
+attempt
+    say next(g)
+rescue problem
+    say problem
+end
+
+# yield inside for each, if, match, attempt; give back ends it early
+to evens_of(xs)
+    for each x in xs
+        if x is 99
+            give back
+        end
+        match x % 2
+            when 0
+                yield x
+            otherwise
+                skip
+        end
+    end
+end
+say list(evens_of([1, 2, 3, 4, 6, 99, 8]))
+
+to careful(xs)
+    for each x in xs
+        attempt
+            yield 10 / x
+        rescue problem
+            yield "oops: " + problem
+        end
+    end
+end
+say list(careful([1, 0, 5]))
+
+# generators that use other generators
+to take(n, gen)
+    for each x in gen
+        if n is 0
+            give back
+        end
+        yield x
+        decrease n by 1
+    end
+end
+say list(take(3, naturals()))
+
+to fib()
+    let a, b be 0, 1
+    while yes
+        yield a
+        change a, b to b, a + b
+    end
+end
+say list(take(10, fib()))
+
+# a type becomes loopable by defining each()
+type Countdown
+    has start
+    to each()
+        let n be me.start
+        while n is over 0
+            yield n
+            decrease n by 1
+        end
+    end
+end
+for each n in new Countdown(3)
+    say "countdown {n}"
+end
+say list(Countdown(2))
+say 2 is in Countdown(3)
+
+type Bag
+    has items
+    to each()
+        give back me.items
+    end
+end
+for each i, x in Bag(["a", "b"])
+    say "{i}: {x}"
+end
+
+# a generator method
+type Range2
+    has low
+    has high
+    to values()
+        let i be me.low
+        while i is under me.high
+            yield i
+            increase i by 1
+        end
+    end
+end
+say list(Range2(3, 6).values())
+
+# errors inside a generator happen when the value is asked for
+to broken()
+    yield 1
+    fail("broke")
+end
+let bg be broken()
+say next(bg)
+attempt
+    say next(bg)
+rescue problem
+    say problem
+end
+say next(bg, "finished")

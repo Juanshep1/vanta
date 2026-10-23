@@ -1,0 +1,32 @@
+# a program with mistakes for `vanta check` (tests/check/expected.txt is what it should say)
+import "../modules/geometry.va" as geo
+kind Color is red, green
+to area(r: number) -> number
+    give back pi * r * r
+end
+to greet(name: text, punct be "!") -> text
+    give back 5
+end
+let score be 10
+fix limit be 3
+let label: text be 42
+say area("big")
+say area(1, 2)
+say greet()
+say greet("a", mood: "x")
+say scroe
+change totl to 5
+change limit to 4
+say geo.nope
+say geo.secret
+say Color.purple
+type Point
+    has x
+    has y
+    to sum() -> number
+        give back me.x + me.y
+    end
+end
+let p be Point(1)
+say helper(3)
+say area(2) + score + p.sum()

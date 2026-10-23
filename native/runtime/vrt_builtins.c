@@ -6,16 +6,19 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <limits.h>
 #include <time.h>
 #include <ctype.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <errno.h>
 
 #define NEED(n, name) do { if (argc != (n)) vrt_fail("%s expects %d value(s), got %d", name, n, argc); } while (0)
 static double num_arg(V v, const char *name) {
     if (v.t == VT_INT) return (double)v.u.i;
     if (v.t == VT_FLOAT) return v.u.f;
+    if (v.t == VT_BIG) return vrt_big_to_double(v);
     vrt_fail("%s needs a number", name);
 }
 static int64_t int_arg(V v, const char *name) {
@@ -37,7 +40,7 @@ static void bputs(Buf *b, const char *s) { bput(b, s, (int64_t)strlen(s)); }
 static V bdone(Buf *b) { V s = vrt_str(b->p ? b->p : "", b->len); free(b->p); return s; }
 
 /* ---------------- math ---------------- */
-static V b_abs(int argc, V *a) { NEED(1, "abs"); if (a[0].t == VT_INT) return VI(a[0].u.i < 0 ? -a[0].u.i : a[0].u.i); return VF(fabs(num_arg(a[0], "abs"))); }
+static V b_abs(int argc, V *a) { NEED(1, "abs"); if (a[0].t == VT_INT || a[0].t == VT_BIG) return vrt_compare('<', a[0], VI(0)).u.i ? vrt_neg(a[0]) : a[0]; return VF(fabs(num_arg(a[0], "abs"))); }
 static V b_ceil(int argc, V *a) { NEED(1, "ceil"); if (a[0].t == VT_INT) return a[0]; return VI((int64_t)ceil(num_arg(a[0], "ceil"))); }
 static V b_floor(int argc, V *a) { NEED(1, "floor"); if (a[0].t == VT_INT) return a[0]; return VI((int64_t)floor(num_arg(a[0], "floor"))); }
 static V b_clamp(int argc, V *a) {
@@ -50,7 +53,8 @@ static V b_clamp(int argc, V *a) {
     return r;
 }
 static int less(V x, V y) {
-    int bn = (x.t == VT_INT || x.t == VT_FLOAT) && (y.t == VT_INT || y.t == VT_FLOAT), bt = x.t == VT_STR && y.t == VT_STR;
+    int bn = (x.t == VT_INT || x.t == VT_FLOAT || x.t == VT_BIG) && (y.t == VT_INT || y.t == VT_FLOAT || y.t == VT_BIG), bt = x.t == VT_STR && y.t == VT_STR;
+    if (x.t == VT_OBJ || y.t == VT_OBJ || (x.t == VT_ENUMV && y.t == VT_ENUMV && ((VEnumV *)x.u.o)->e == ((VEnumV *)y.u.o)->e)) return vrt_truthy(vrt_compare('<', x, y));
     if (!bn && !bt) vrt_fail("min/max need all numbers or all text");
     return vrt_truthy(vrt_compare('<', x, y));
 }
@@ -99,6 +103,12 @@ static uint64_t rng(void) {
     rng_state ^= rng_state << 13; rng_state ^= rng_state >> 7; rng_state ^= rng_state << 17;
     return rng_state;
 }
+static V b_random_seed(int argc, V *a) {    /* the same xorshift64 as vanta.py, so seeded runs match */
+    NEED(1, "random_seed");
+    rng_state = (uint64_t)int_arg(a[0], "random_seed") ^ 0x9E3779B97F4A7C15ULL;
+    if (!rng_state) rng_state = 0x9E3779B97F4A7C15ULL;
+    return VNIL;
+}
 static V b_random(int argc, V *a) {
     NEED(2, "random");
     int64_t lo = int_arg(a[0], "random"), hi = int_arg(a[1], "random");
@@ -134,7 +144,8 @@ static V b_length(int argc, V *a) {
     case VT_LIST: return VI(AS_LIST(a[0])->len);
     case VT_MAP: return VI(AS_MAP(a[0])->count);
     case VT_BYTES: return VI(AS_BYTES(a[0])->len);
-    default: vrt_fail("length works on text, lists, maps, or bytes");
+    default: { V n = vrt_core_length(a[0]); if (n.t != VT_UNDEF) return n; }   /* sets, kinds, objects with length() */
+        vrt_fail("length works on text, lists, maps, or bytes");
     }
 }
 static V b_text(int argc, V *a) { NEED(1, "text"); return vrt_display(a[0]); }
@@ -142,14 +153,18 @@ static V b_number(int argc, V *a) {
     NEED(1, "number");
     V v = a[0];
     if (v.t == VT_BOOL) vrt_fail("can't turn yes/no into a number");
-    if (v.t == VT_INT || v.t == VT_FLOAT) return v;
+    if (v.t == VT_INT || v.t == VT_FLOAT || v.t == VT_BIG) return v;
     if (v.t == VT_STR) {
         const char *s = S(v)->data; char *end;
         while (isspace((unsigned char)*s)) s++;
         if (*s) {
             long long i = strtoll(s, &end, 10);
+            const char *e2 = end;
             while (isspace((unsigned char)*end)) end++;
-            if (*end == 0) return VI(i);
+            if (*end == 0) {
+                if ((i == LLONG_MAX || i == LLONG_MIN) && e2 - s > 18) return vrt_big_parse(s, e2 - s);   /* too big for 64 bits */
+                return VI(i);
+            }
             double d = strtod(s, &end);
             while (isspace((unsigned char)*end)) end++;
             if (*end == 0) return VF(d);
@@ -170,7 +185,8 @@ static const char *tname(V v) {
     case VT_FUNC: case VT_BUILTIN: case VT_BOUND: return "function";
     case VT_TYPE: return "type";
     case VT_OBJ: return AS_INST(v)->type->name;
-    default: return "value";
+    case VT_HANDLE: return ((VHandle *)v.u.o)->kind;
+    default: return vrt_core_tname(v);
     }
 }
 static V b_type_of(int argc, V *a) { NEED(1, "type_of"); return vrt_cstr(tname(a[0])); }
@@ -183,10 +199,11 @@ static V b_typeof(int argc, V *a) {
     case VT_LIST: return vrt_cstr("list");
     case VT_MAP: return vrt_cstr("map");
     case VT_BYTES: return vrt_cstr("bytes");
+    case VT_HANDLE: return vrt_cstr(((VHandle *)a[0].u.o)->kind);
     default: return vrt_cstr("nothing");
     }
 }
-static V b_is_number(int argc, V *a) { NEED(1, "is_number"); return VB(a[0].t == VT_INT || a[0].t == VT_FLOAT); }
+static V b_is_number(int argc, V *a) { NEED(1, "is_number"); return VB(a[0].t == VT_INT || a[0].t == VT_FLOAT || a[0].t == VT_BIG); }
 static V b_is_text(int argc, V *a) { NEED(1, "is_text"); return VB(a[0].t == VT_STR); }
 static V b_is_list(int argc, V *a) { NEED(1, "is_list"); return VB(a[0].t == VT_LIST); }
 static V b_is_map(int argc, V *a) { NEED(1, "is_map"); return VB(a[0].t == VT_MAP); }
@@ -242,7 +259,11 @@ static V split_by(VStr *x, VStr *sep) {
     vrt_list_push(r, vrt_str(x->data + start, x->len - start));
     return r;
 }
-static V b_split(int argc, V *a) { NEED(2, "split"); V s = text_of(a[0]), p = text_of(a[1]); return split_by(S(s), S(p)); }
+static V b_split(int argc, V *a) {
+    NEED(2, "split"); V s = text_of(a[0]), p = text_of(a[1]);
+    if (S(p)->len == 0) return vrt_iter_list(s);          /* split("abc", "") -> its characters */
+    return split_by(S(s), S(p));
+}
 static V b_lines(int argc, V *a) { NEED(1, "lines"); V s = text_of(a[0]); VStr nl = {0}; (void)nl; V sep = vrt_cstr("\n"); return split_by(S(s), S(sep)); }
 static V b_join(int argc, V *a) {
     NEED(2, "join");
@@ -270,7 +291,7 @@ static V b_replace(int argc, V *a) {
 }
 static V b_contains(int argc, V *a) {
     NEED(2, "contains");
-    if (a[0].t != VT_LIST && a[0].t != VT_STR && a[0].t != VT_MAP) vrt_fail("contains works on lists, text, or maps");
+    if (a[0].t != VT_LIST && a[0].t != VT_STR && a[0].t != VT_MAP && a[0].t != VT_SET) vrt_fail("contains works on lists, text, or maps");
     return vrt_in(a[1], a[0]);
 }
 static V b_starts_with(int argc, V *a) { NEED(2, "starts_with"); V s = text_of(a[0]), p = text_of(a[1]); return VB(S(p)->len <= S(s)->len && memcmp(S(s)->data, S(p)->data, (size_t)S(p)->len) == 0); }
@@ -411,8 +432,9 @@ static V b_slice(int argc, V *a) {
 static int sort_desc = 0;
 static int cmp_sort(const void *x, const void *y) {
     V a = *(const V *)x, b = *(const V *)y;
-    int bn = (a.t == VT_INT || a.t == VT_FLOAT) && (b.t == VT_INT || b.t == VT_FLOAT), bt = a.t == VT_STR && b.t == VT_STR;
-    if (!bn && !bt) vrt_fail("sort needs a list of all numbers or all text");
+    int bn = (a.t == VT_INT || a.t == VT_FLOAT || a.t == VT_BIG) && (b.t == VT_INT || b.t == VT_FLOAT || b.t == VT_BIG), bt = a.t == VT_STR && b.t == VT_STR;
+    int ord = a.t == VT_OBJ || b.t == VT_OBJ || (a.t == VT_ENUMV && b.t == VT_ENUMV);   /* less_than() / kind order */
+    if (!bn && !bt && !ord) vrt_fail("sort needs a list of all numbers or all text");
     int c = vrt_truthy(vrt_compare('<', a, b)) ? -1 : vrt_truthy(vrt_compare('>', a, b)) ? 1 : 0;
     return sort_desc ? -c : c;
 }
@@ -502,12 +524,17 @@ static V b_flatten(int argc, V *a) {
     return r;
 }
 static V b_range(int argc, V *a) {
-    int64_t lo = 0, hi;
+    int64_t lo = 0, hi, step = 1;
     if (argc == 1) hi = int_arg(a[0], "range");
     else if (argc == 2) { lo = int_arg(a[0], "range"); hi = int_arg(a[1], "range"); }
-    else vrt_fail("range expects 1 or 2 numbers");
-    V r = vrt_list(hi > lo ? hi - lo : 0);
-    for (int64_t i = lo; i < hi; i++) vrt_list_push(r, VI(i));
+    else if (argc == 3) {
+        lo = int_arg(a[0], "range"); hi = int_arg(a[1], "range"); step = int_arg(a[2], "range");
+        if (step == 0) vrt_fail("range's step can't be zero");
+    }
+    else vrt_fail("range expects 1, 2 or 3 numbers (start, stop, step)");
+    V r = vrt_list(step == 1 && hi > lo ? hi - lo : 4);
+    if (step > 0) for (int64_t i = lo; i < hi; i += step) vrt_list_push(r, VI(i));
+    else for (int64_t i = lo; i > hi; i += step) vrt_list_push(r, VI(i));
     return r;
 }
 static V b_zip(int argc, V *a) {
@@ -559,7 +586,7 @@ static V b_get(int argc, V *a) {
 static V copy_map(V m) { V r = vrt_map(); VMap *x = AS_MAP(m); for (int64_t i = 0; i < x->nent; i++) if (x->ents[i].used) vrt_map_set(r, x->ents[i].key, x->ents[i].val); return r; }
 static V b_remove_key(int argc, V *a) { NEED(2, "remove_key"); map_arg(a[0], "remove_key needs a map"); V r = copy_map(a[0]); vrt_map_del(r, a[1]); return r; }
 static V b_merge(int argc, V *a) {
-    if (argc < 2) vrt_fail("merge needs at least two maps");
+    if (argc < 1) vrt_fail("merge needs at least one map");
     V r = vrt_map();
     for (int i = 0; i < argc; i++) { map_arg(a[i], "merge needs maps"); VMap *x = AS_MAP(a[i]); for (int64_t k = 0; k < x->nent; k++) if (x->ents[k].used) vrt_map_set(r, x->ents[k].key, x->ents[k].val); }
     return r;
@@ -647,7 +674,12 @@ static V b_shift_right(int argc, V *a) { NEED(2, "shift_right"); return vrt_arit
 static V b_read_file(int argc, V *a) {
     NEED(1, "read_file"); V p = text_of(a[0]); int64_t n;
     V y = read_whole(S(p)->data, &n, "read");
-    return vrt_str((const char *)AS_BYTES(y)->data, n);
+    uint8_t *d = AS_BYTES(y)->data; int64_t w = 0;       /* universal newlines, like Python's text mode */
+    for (int64_t i = 0; i < n; i++) {
+        if (d[i] == '\r') { d[w++] = '\n'; if (i + 1 < n && d[i + 1] == '\n') i++; }
+        else d[w++] = d[i];
+    }
+    return vrt_str((const char *)d, w);
 }
 static V write_mode(int argc, V *a, const char *mode, const char *name, const char *verb) {
     NEED(2, name);
@@ -726,7 +758,12 @@ static V b_sleep(int argc, V *a) {
     NEED(1, "sleep");
     if (a[0].t != VT_INT && a[0].t != VT_FLOAT) vrt_fail("sleep expects a number of seconds");
     double s = num_arg(a[0], "sleep");
-    if (s > 0) { struct timespec ts = {(time_t)s, (long)((s - floor(s)) * 1e9)}; nanosleep(&ts, NULL); }
+    if (s > 0) {
+        struct timespec ts = {(time_t)s, (long)((s - floor(s)) * 1e9)}, left;
+        VRT_BLOCKING_BEGIN();                 /* other tasks run while this one sleeps */
+        while (nanosleep(&ts, &left) != 0 && errno == EINTR) ts = left;
+        VRT_BLOCKING_END();
+    }
     return VNIL;
 }
 static V b_assert(int argc, V *a) {
@@ -755,11 +792,12 @@ static V b_env(int argc, V *a) {
     if (argc != 1 && argc != 2) vrt_fail("env expects a name and an optional fallback");
     V n = text_of(a[0]); const char *v = getenv(S(n)->data);
     if (v) return vrt_cstr(v);
-    return argc == 2 ? a[1] : VNIL;
+    return argc == 2 ? a[1] : vrt_cstr("");
 }
 
 /* ---------------- JSON ---------------- */
-static void json_out(Buf *b, V v) {
+static void json_nl(Buf *b, int ind, int level) { if (ind < 0) return; bputs(b, "\n"); for (int i = 0; i < ind * level; i++) bputs(b, " "); }
+static void json_out(Buf *b, V v, int ind, int level) {
     char tmp[64];
     switch (v.t) {
     case VT_NIL: case VT_UNDEF: bputs(b, "null"); return;
@@ -794,27 +832,39 @@ static void json_out(Buf *b, V v) {
         bputs(b, "\"");
         return;
     }
-    case VT_LIST: { VList *l = AS_LIST(v); bputs(b, "["); for (int64_t i = 0; i < l->len; i++) { if (i) bputs(b, ", "); json_out(b, l->items[i]); } bputs(b, "]"); return; }
+    case VT_LIST: {
+        VList *l = AS_LIST(v); bputs(b, "[");
+        for (int64_t i = 0; i < l->len; i++) { if (i) bputs(b, ind < 0 ? ", " : ","); json_nl(b, ind, level + 1); json_out(b, l->items[i], ind, level + 1); }
+        if (l->len) json_nl(b, ind, level);
+        bputs(b, "]"); return;
+    }
     case VT_MAP: {
         VMap *m = AS_MAP(v); int first = 1; bputs(b, "{");
         for (int64_t i = 0; i < m->nent; i++) if (m->ents[i].used) {
-            if (!first) bputs(b, ", ");
+            if (!first) bputs(b, ind < 0 ? ", " : ",");
             first = 0;
+            json_nl(b, ind, level + 1);
             V k = m->ents[i].key;
-            if (k.t == VT_STR) json_out(b, k);
+            if (k.t == VT_STR) json_out(b, k, ind, level + 1);
             else if (k.t == VT_BOOL) bputs(b, k.u.i ? "\"true\"" : "\"false\"");
             else if (k.t == VT_NIL) bputs(b, "\"null\"");
             else { V d = vrt_display(k); bputs(b, "\""); bputs(b, S(d)->data); bputs(b, "\""); }
             bputs(b, ": ");
-            json_out(b, m->ents[i].val);
+            json_out(b, m->ents[i].val, ind, level + 1);
         }
+        if (!first) json_nl(b, ind, level);
         bputs(b, "}");
         return;
     }
     default: vrt_fail("that value can't be turned into JSON");
     }
 }
-static V b_to_json(int argc, V *a) { NEED(1, "to_json"); Buf b = {0}; bput(&b, "", 0); json_out(&b, a[0]); return bdone(&b); }
+static V b_to_json(int argc, V *a) {
+    if (argc != 1 && argc != 2) vrt_fail("to_json expects a value and an optional indent");
+    int ind = argc == 2 && a[1].t != VT_NIL ? (int)int_arg(a[1], "to_json") : -1;
+    if (argc == 2 && ind < 0) ind = 0;
+    Buf b = {0}; bput(&b, "", 0); json_out(&b, a[0], ind, 0); return bdone(&b);
+}
 
 typedef struct { const char *s; int64_t i, n; } JP;
 static void jws(JP *p) { while (p->i < p->n && isspace((unsigned char)p->s[p->i])) p->i++; }
@@ -916,7 +966,7 @@ typedef struct { const char *name; VBuiltinPtr fn; } Entry;
 static const Entry table[] = {
     {"abs", b_abs}, {"ceil", b_ceil}, {"floor", b_floor}, {"clamp", b_clamp}, {"max", b_max}, {"min", b_min}, {"power", b_power},
     {"round", b_round}, {"sign", b_sign}, {"sqrt", b_sqrt}, {"sum", b_sum}, {"product", b_product}, {"random", b_random},
-    {"random_float", b_random_float}, {"pick", b_pick}, {"shuffle", b_shuffle}, {"exp", b_exp}, {"sin", b_sin}, {"cos", b_cos},
+    {"random_float", b_random_float}, {"random_seed", b_random_seed}, {"pick", b_pick}, {"shuffle", b_shuffle}, {"exp", b_exp}, {"sin", b_sin}, {"cos", b_cos},
     {"tan", b_tan}, {"asin", b_asin}, {"acos", b_acos}, {"atan", b_atan}, {"atan2", b_atan2}, {"log", b_log},
     {"length", b_length}, {"text", b_text}, {"number", b_number}, {"type_of", b_type_of}, {"typeof", b_typeof},
     {"is_number", b_is_number}, {"is_text", b_is_text}, {"is_list", b_is_list}, {"is_map", b_is_map}, {"is_bytes", b_is_bytes},
@@ -944,8 +994,13 @@ static const Entry table[] = {
 };
 
 V (*vrt_extra_builtins)(const char *name) = NULL;   /* set by the game runtime when it is linked in */
+static const VEntry *extra_tables[32];
+static int nextra_tables = 0;
+void vrt_register_builtins(const VEntry *t) { if (nextra_tables < 32) extra_tables[nextra_tables++] = t; }
 V vrt_builtin_named(const char *name) {
     for (const Entry *e = table; e->name; e++) if (!strcmp(e->name, name)) return vrt_builtin(e->name, e->fn);
+    for (int i = 0; i < nextra_tables; i++)
+        for (const VEntry *e = extra_tables[i]; e->name; e++) if (!strcmp(e->name, name)) return vrt_builtin(e->name, e->fn);
     if (vrt_extra_builtins) return vrt_extra_builtins(name);
     return VUNDEF;
 }

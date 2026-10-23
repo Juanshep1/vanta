@@ -1,0 +1,40 @@
+# Kinds (enums): a fixed set of named values.
+kind Color is red, green, blue
+
+kind Direction
+    north, east
+    south
+    west
+end
+
+say Color.red
+say Color
+say type_of(Color.green)
+say Color.blue.name + " is number " + Color.blue.index
+say length(Color)
+for each c in Color
+    say "color: {c}"
+end
+say [d.name for each d in Direction]
+assert(Color.red is Color.red)
+assert(Color.red is not Color.green)
+assert(Color.red is a Color)
+assert(not (Direction.north is a Color))
+say Color.red < Color.blue
+say Direction.west is in Direction
+let favourite be Color.green
+match favourite
+    when Color.red
+        say "warm"
+    when Color.green, Color.blue
+        say "cool"
+end
+let paint be {Color.red: "#f00", Color.green: "#0f0"}
+say paint[Color.green]
+say sort([Color.blue, Color.red, Color.green])
+say [Color.red, Direction.south]
+attempt
+    say Color.purple
+rescue problem
+    say problem
+end

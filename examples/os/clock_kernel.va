@@ -1,0 +1,40 @@
+# clock_kernel.va — timers, the keyboard and interrupts in a tiny kernel.
+#
+#   python3 native/vantac.py examples/os/clock_kernel.va --kernel -o out/clock.elf
+#   qemu-system-x86_64 -kernel out/clock.elf
+#
+# A clock ticks in the corner (a timer), every key you type is echoed (the keyboard driver),
+# and a counter shows how many keyboard interrupts arrived (a Vanta interrupt handler). Escape stops it.
+
+clear_screen("blue")
+keep_top_rows(2)
+print_at(0, 0, pad_right(" My first kernel", 80), "black on light gray")
+
+to show_time()
+    print_at(66, 0, "  " + clock() + " UTC", "black on light gray")
+end
+every(1000, show_time)
+show_time()
+
+let interrupts be 0
+to keyboard_interrupt()
+    change interrupts to interrupts + 1
+    print_at(50, 1, "keyboard interrupts: {interrupts}", "yellow on blue")
+end
+on_interrupt(1, keyboard_interrupt)
+
+say "Type something (Escape to stop):"
+let key be read_key()
+while key is not "escape"
+    if key is "enter"
+        say ""
+    otherwise if length(key) is 1
+        set_color("white on blue")
+        print_at(cursor_position()[0], cursor_position()[1], key)
+        set_cursor(cursor_position()[0] + 1, cursor_position()[1])
+    end
+    change key to read_key()
+end
+say ""
+say "Bye! I was up for {uptime()} seconds."
+halt()

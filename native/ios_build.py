@@ -89,7 +89,17 @@ def build_ios(comp, out_app, name, bundle_id, resources, icon, flags):
                 f.write(text)
         if fname.endswith(".c"):
             sources.append(path)
-    sources += [os.path.join(RUNTIME, n) for n in ("vrt.c", "vrt_builtins.c", "vgame.c", "vgame_ios.m")]
+    sources += [os.path.join(RUNTIME, n) for n in ("vrt.c", "vrt_builtins.c", "vrt_core.c", "vrt_big.c", "vgame.c", "vcanvas.c", "vstb.c", "vgame_ios.m")]
+    # optional runtime files the program uses (threads, sockets, sqlite, ...); iOS has no libcurl, so http_get & co
+    # aren't available in phone builds
+    _vc = sys.modules.get("__main__")
+    if not hasattr(_vc, "optional_runtime"):
+        import vantac as _vc
+    opt_files, opt_libs = _vc.optional_runtime(comp.used_builtins)
+    if any(os.path.basename(f) == "vrt_http.c" for f in opt_files):
+        print("Oops! http_get/http_post/http_request/download aren't available in iPhone builds yet (no libcurl on iOS)")
+        sys.exit(1)
+    sources += opt_files
     sdk = run(["xcrun", "--sdk", "iphoneos", "--show-sdk-path"], "finding the iOS SDK").strip()
     cc = ["xcrun", "--sdk", "iphoneos", "clang", "-arch", "arm64", "-miphoneos-version-min=15.0", "-isysroot", sdk]
     objs, procs = [], []
@@ -117,6 +127,7 @@ def build_ios(comp, out_app, name, bundle_id, resources, icon, flags):
         shutil.rmtree(out_app)
     os.makedirs(out_app)
     link = cc + objs + [os.path.join(SDL_IOS, "lib", "libSDL2.a"), "-liconv", "-lm"]
+    link += opt_libs
     for fw in FRAMEWORKS:
         link += ["-framework", fw]
     run(link + ["-o", os.path.join(out_app, exe_name)], "linking")

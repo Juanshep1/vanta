@@ -721,12 +721,14 @@ static const Entry game_table[] = {
     {"audio_open", b_audio_open}, {"audio_queue", b_audio_queue}, {"audio_queued", b_audio_queued}, {"audio_close", b_audio_close},
     {NULL, NULL}
 };
+static V (*prev_extra)(const char *name);
 V vgame_builtin_named(const char *name) {
     for (const Entry *e = game_table; e->name; e++) if (!strcmp(e->name, name)) return vrt_builtin(e->name, e->fn);
-    return VUNDEF;
+    return prev_extra ? prev_extra(name) : VUNDEF;   /* the canvas runtime (vcanvas.c), when it's linked too */
 }
 extern V (*vrt_extra_builtins)(const char *name);
 __attribute__((constructor)) static void vgame_register(void) {
+    prev_extra = vrt_extra_builtins;
     vrt_extra_builtins = vgame_builtin_named;
 #ifdef VGAME_TOUCH
     /* on a phone the program's data files sit inside the app bundle: run from there */

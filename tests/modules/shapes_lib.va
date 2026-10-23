@@ -1,0 +1,5 @@
+# Imports another module by a path relative to this file.
+import "geometry" as g
+to ring_area(outer, inner)
+    give back g.area(outer) - g.area(inner)
+end

@@ -1,0 +1,74 @@
+# Standard library: logging.   import "log"
+#
+# log_debug(message)  log_info(message)  log_warn(message)  log_error(message)
+#     print "2026-10-21 14:30:05 INFO  message" — only when the level is at or above the current one
+# log_level("debug" | "info" | "warn" | "error" | "off")    the lowest level shown (default "info")
+# log_to_file(path)       also append every shown line to a file (nothing = stop)
+# log_show_time(yes/no)   start lines with the date and time (default yes)
+# log_quiet(yes/no)       stop printing to the screen (the file still gets the lines)
+# log_lines()             every line logged so far in this run (handy in tests)
+# Logging is safe to use from several tasks at once.
+
+let _log_levels be {"debug": 10, "info": 20, "warn": 30, "error": 40, "off": 100}
+let _log_state be {"level": 20, "file": nothing, "time": yes, "quiet": no}
+let _log_history be []
+let _log_guard be new_lock()
+
+to log_level(name)
+    let key be lowercase(text(name))
+    if not has_key(_log_levels, key)
+        fail("log_level must be debug, info, warn, error or off")
+    end
+    change _log_state["level"] to _log_levels[key]
+end
+
+to log_to_file(path)
+    change _log_state["file"] to path
+end
+
+to log_show_time(on)
+    change _log_state["time"] to on
+end
+
+to log_quiet(on)
+    change _log_state["quiet"] to on
+end
+
+to log_lines()
+    give back _log_history[0:]
+end
+
+to _log(level, label, message)
+    if level < _log_state["level"]
+        give back nothing
+    end
+    let line be pad_right(label, 5) + " " + text(message)
+    if _log_state["time"]
+        change line to format_date(now()) + " " + line
+    end
+    lock _log_guard
+        add line to _log_history
+        if not _log_state["quiet"]
+            say line
+        end
+        if _log_state["file"] is not nothing
+            append_file(_log_state["file"], line + "\n")
+        end
+    end
+end
+
+to log_debug(message)
+    _log(10, "DEBUG", message)
+end
+
+to log_info(message)
+    _log(20, "INFO", message)
+end
+
+to log_warn(message)
+    _log(30, "WARN", message)
+end
+
+to log_error(message)
+    _log(40, "ERROR", message)
+end

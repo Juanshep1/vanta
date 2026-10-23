@@ -1,0 +1,95 @@
+# yes/no and numbers are different map keys and set items; plus the smaller 6.0 additions.
+let m be {1: "one", yes: "yes", 0: "zero", no: "no"}
+say m
+say length(m)
+say m[1] + " " + m[yes]
+say yes is in m
+say 1.0 is in m
+say keys(m)
+say has_key(m, no)
+let s be set([1, yes, 0, no, 1.0])
+say s
+say length(s)
+for each k, v in {yes: 1, 1: 2}
+    say "{k} -> {v}"
+end
+say {v: k for each k, v in {"a": 1, "b": 2}}
+say [i * 10 + x for each i, x in [5, 6]]
+say split("abc", "")
+say range(10, 0, -3)
+say range(0, 10, 4)
+say merge({"a": 1})
+say 7 // 2
+say -7 // 2
+say 7.5 // 2
+say 2 ^ 70 // 3
+say 10 mod 4
+say 1e3 + 2.5e-1
+say 1 < 5 < 10
+say 1 is under 20 is under 10
+let s2 be set([5, 1, 3])
+say sum(s2) + " " + max(s2) + " " + min(s2)
+say sort(s2)
+say join(s2, ",")
+say map(make x give x * 2, s2)
+each(make x give say(x), [1, 2])
+say("say works as a function too")
+let total be 1 +
+    2 +
+    3
+let data be [
+    1, 2,
+    3,   # comments are fine
+]
+say total + length(data)
+to greet(name)
+    give back name
+end
+attempt
+    greet("a", "b")
+rescue problem
+    say problem
+end
+to nothing_taken()
+    give back 1
+end
+attempt
+    nothing_taken(1)
+rescue problem
+    say problem
+end
+let empty be []
+attempt
+    say empty[0]
+rescue problem
+    say problem
+end
+attempt
+    say ""[0]
+rescue problem
+    say problem
+end
+let x be 2.5
+say "{x:.2} {x}"
+let shown be make v give "{v:>6.1}"
+say shown(3.14159)
+to fmt_inside(v)
+    give back "[{v:^7}]"
+end
+say fmt_inside("mid")
+say "JSON looks like {\"a\": null} and that's fine"
+to depth(n)
+    if n is 0
+        give back 0
+    end
+    give back 1 + depth(n - 1)
+end
+say depth(5000)
+to forever(n)
+    give back forever(n + 1)
+end
+attempt
+    forever(0)
+rescue problem
+    say problem
+end

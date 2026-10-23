@@ -1,0 +1,567 @@
+# Game helpers: vectors, rectangles and collisions, simple physics, timers, scenes,
+# tweening, animation, particles and random helpers.      import "game"
+#
+# Everything here is plain Vanta, so you can read it, copy it and change it. The
+# drawing parts (particles) use the canvas builtins - see docs/GRAPHICS.md.
+
+# ------------------------------------------------------------------ vectors
+# A 2D vector: a position, a speed or a direction.   let v be vec(3, 4)
+type Vec
+    has x
+    has y
+
+    to added(other)
+        give back new Vec(me.x + other.x, me.y + other.y)
+    end
+
+    to subtracted(other)
+        give back new Vec(me.x - other.x, me.y - other.y)
+    end
+
+    to scaled(k)
+        give back new Vec(me.x * k, me.y * k)
+    end
+
+    to length()
+        give back sqrt(me.x * me.x + me.y * me.y)
+    end
+
+    to normalized()
+        let len be me.length()
+        if len is 0
+            give back new Vec(0, 0)
+        end
+        give back new Vec(me.x / len, me.y / len)
+    end
+
+    to dot(other)
+        give back me.x * other.x + me.y * other.y
+    end
+
+    to distance_to(other)
+        give back distance(me.x, me.y, other.x, other.y)
+    end
+
+    to angle()
+        give back atan2(me.y, me.x) * 180 / pi
+    end
+
+    to rotated(degrees)
+        let t be degrees * pi / 180
+        give back new Vec(me.x * cos(t) - me.y * sin(t), me.x * sin(t) + me.y * cos(t))
+    end
+
+    to show()
+        give back "vec({me.x}, {me.y})"
+    end
+end
+
+to vec(x, y)
+    give back new Vec(x, y)
+end
+
+# a vector pointing at an angle (degrees, 0 = right, 90 = down) with a length
+to vec_from_angle(degrees, len be 1)
+    let t be degrees * pi / 180
+    give back new Vec(cos(t) * len, sin(t) * len)
+end
+
+# ------------------------------------------------------------------ distances and angles
+to distance(x1, y1, x2, y2)
+    give back sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1))
+end
+
+# the angle from one point to another, in degrees (0 = right, 90 = down)
+to angle_to(x1, y1, x2, y2)
+    give back atan2(y2 - y1, x2 - x1) * 180 / pi
+end
+
+# ------------------------------------------------------------------ rectangles and collisions
+# A rectangle: x, y is the top-left corner.   let wall be new Rect(0, 400, 640, 80)
+type Rect
+    has x
+    has y
+    has w
+    has h
+
+    to right()
+        give back me.x + me.w
+    end
+
+    to bottom()
+        give back me.y + me.h
+    end
+
+    to center_x()
+        give back me.x + me.w / 2
+    end
+
+    to center_y()
+        give back me.y + me.h / 2
+    end
+
+    to has_point(px, py)
+        give back point_in_rect(px, py, me.x, me.y, me.w, me.h)
+    end
+
+    to overlaps(other)
+        give back overlap(me.x, me.y, me.w, me.h, other.x, other.y, other.w, other.h)
+    end
+
+    to draw(colour be nothing)
+        if colour is nothing
+            rect(me.x, me.y, me.w, me.h)
+        otherwise
+            rect(me.x, me.y, me.w, me.h, colour)
+        end
+    end
+
+    to show()
+        give back "Rect({me.x}, {me.y}, {me.w}, {me.h})"
+    end
+end
+
+# do two rectangles overlap? (axis-aligned bounding boxes)
+to overlap(x1, y1, w1, h1, x2, y2, w2, h2)
+    give back x1 < x2 + w2 and x2 < x1 + w1 and y1 < y2 + h2 and y2 < y1 + h1
+end
+
+# the same for two things that have x, y, w and h (a Rect, a Body, your own type)
+to rects_overlap(a, b)
+    give back overlap(a.x, a.y, a.w, a.h, b.x, b.y, b.w, b.h)
+end
+
+to point_in_rect(px, py, x, y, w, h)
+    give back px >= x and px < x + w and py >= y and py < y + h
+end
+
+to circles_overlap(x1, y1, r1, x2, y2, r2)
+    let dx be x2 - x1
+    let dy be y2 - y1
+    give back dx * dx + dy * dy < (r1 + r2) * (r1 + r2)
+end
+
+to circle_rect_overlap(cx, cy, r, x, y, w, h)
+    let nx be clamp(cx, x, x + w)
+    let ny be clamp(cy, y, y + h)
+    let dx be cx - nx
+    let dy be cy - ny
+    give back dx * dx + dy * dy < r * r
+end
+
+# which side of b did a hit? "left", "right", "top", "bottom" (the side of b), or nothing
+# when they don't overlap. Good for bouncing a ball off bricks.
+to hit_side(a, b)
+    if not rects_overlap(a, b)
+        give back nothing
+    end
+    let from_left be a.x + a.w - b.x
+    let from_right be b.x + b.w - a.x
+    let from_top be a.y + a.h - b.y
+    let from_bottom be b.y + b.h - a.y
+    let least be min(min(from_left, from_right), min(from_top, from_bottom))
+    if least is from_top
+        give back "top"
+    end
+    if least is from_bottom
+        give back "bottom"
+    end
+    if least is from_left
+        give back "left"
+    end
+    give back "right"
+end
+
+# ------------------------------------------------------------------ physics
+# A moving box with a velocity. move_and_collide stops it at solid rectangles and
+# tells you which way it bumped (on_ground is yes when it's standing on something).
+type Body
+    has x
+    has y
+    has w
+    has h
+    has vx
+    has vy
+    has on_ground
+    has hit_wall
+    has hit_ceiling
+
+    to setup(x, y, w, h)
+        change me.x to x
+        change me.y to y
+        change me.w to w
+        change me.h to h
+        change me.vx to 0
+        change me.vy to 0
+        change me.on_ground to no
+        change me.hit_wall to no
+        change me.hit_ceiling to no
+    end
+
+    to apply_gravity(gravity, dt, max_fall be 900)
+        change me.vy to min(me.vy + gravity * dt, max_fall)
+    end
+
+    # move without collisions
+    to move(dt)
+        change me.x to me.x + me.vx * dt
+        change me.y to me.y + me.vy * dt
+    end
+
+    # move, stopping at any of the solids (a list of things with x, y, w, h)
+    to move_and_collide(solids, dt)
+        change me.on_ground to no
+        change me.hit_wall to no
+        change me.hit_ceiling to no
+        change me.x to me.x + me.vx * dt
+        for each s in solids
+            if rects_overlap(me, s)
+                if me.vx > 0
+                    change me.x to s.x - me.w
+                otherwise if me.vx < 0
+                    change me.x to s.x + s.w
+                end
+                change me.vx to 0
+                change me.hit_wall to yes
+            end
+        end
+        change me.y to me.y + me.vy * dt
+        for each s in solids
+            if rects_overlap(me, s)
+                if me.vy > 0
+                    change me.y to s.y - me.h
+                    change me.on_ground to yes
+                otherwise if me.vy < 0
+                    change me.y to s.y + s.h
+                    change me.hit_ceiling to yes
+                end
+                change me.vy to 0
+            end
+        end
+    end
+
+    to center_x()
+        give back me.x + me.w / 2
+    end
+
+    to center_y()
+        give back me.y + me.h / 2
+    end
+end
+
+# ------------------------------------------------------------------ numbers that move
+to lerp(a, b, t)
+    give back a + (b - a) * t
+end
+
+# move value toward target by at most step (never overshoots)
+to approach(value, target, step)
+    if value < target
+        give back min(value + step, target)
+    end
+    give back max(value - step, target)
+end
+
+# wrap value into low..high (like a ship leaving one edge of the screen and coming back on the other)
+to wrap(value, low, high)
+    let span be high - low
+    if span <= 0
+        give back low
+    end
+    let v be (value - low) % span
+    if v < 0
+        change v to v + span
+    end
+    give back low + v
+end
+
+# smoothly follow a target (a camera, a pet): speed is how quickly, about 5 to 10
+to smooth_follow(current, target, speed, dt)
+    give back current + (target - current) * min(1, speed * dt)
+end
+
+# ------------------------------------------------------------------ easing (t goes 0 -> 1)
+to ease_linear(t)
+    give back t
+end
+
+to ease_in(t)
+    give back t * t
+end
+
+to ease_out(t)
+    give back 1 - (1 - t) * (1 - t)
+end
+
+to ease_in_out(t)
+    if t < 0.5
+        give back 2 * t * t
+    end
+    give back 1 - (-2 * t + 2) * (-2 * t + 2) / 2
+end
+
+to ease_out_back(t)
+    let c be 1.70158
+    give back 1 + (c + 1) * (t - 1) * (t - 1) * (t - 1) + c * (t - 1) * (t - 1)
+end
+
+to ease_out_bounce(t)
+    let n be 7.5625
+    let d be 2.75
+    if t < 1 / d
+        give back n * t * t
+    end
+    if t < 2 / d
+        let u be t - 1.5 / d
+        give back n * u * u + 0.75
+    end
+    if t < 2.5 / d
+        let u be t - 2.25 / d
+        give back n * u * u + 0.9375
+    end
+    let u be t - 2.625 / d
+    give back n * u * u + 0.984375
+end
+
+# A value that glides from one number to another over some seconds.
+#   let slide be tween(0, 300, 1.5, ease_out)   ...   slide.update(dt)   x = slide.value()
+type Tween
+    has start
+    has finish
+    has seconds
+    has time
+    has easing
+
+    to update(dt)
+        change me.time to min(me.time + dt, me.seconds)
+    end
+
+    to progress()
+        if me.seconds <= 0
+            give back 1
+        end
+        give back me.time / me.seconds
+    end
+
+    to value()
+        let e be me.easing
+        give back lerp(me.start, me.finish, e(me.progress()))
+    end
+
+    to done()
+        give back me.time >= me.seconds
+    end
+
+    to restart()
+        change me.time to 0
+    end
+end
+
+to tween(start, finish, seconds, easing be nothing)
+    if easing is nothing
+        change easing to ease_in_out
+    end
+    give back new Tween(start, finish, seconds, 0, easing)
+end
+
+# ------------------------------------------------------------------ timers
+# Fires after some seconds (and again and again when repeating).
+#   let spawn be timer(2, yes)   ...   if spawn.tick(dt) ... end
+type Timer
+    has seconds
+    has left
+    has repeating
+    has active
+
+    to tick(dt)
+        if not me.active
+            give back no
+        end
+        change me.left to me.left - dt
+        if me.left <= 0
+            if me.repeating
+                change me.left to me.left + me.seconds
+            otherwise
+                change me.active to no
+                change me.left to 0
+            end
+            give back yes
+        end
+        give back no
+    end
+
+    to reset()
+        change me.left to me.seconds
+        change me.active to yes
+    end
+
+    to progress()
+        give back 1 - me.left / me.seconds
+    end
+end
+
+to timer(seconds, repeating be no)
+    give back new Timer(seconds, seconds, repeating, yes)
+end
+
+# ------------------------------------------------------------------ animation
+# Steps through frame numbers of a sprite sheet at some frames per second.
+#   let walk be animation([0, 1, 2, 1], 8)   ...   walk.update(dt)   draw_frame(sheet, walk.frame(), x, y)
+type Animation
+    has frames
+    has fps
+    has looping
+    has time
+
+    to update(dt)
+        change me.time to me.time + dt
+    end
+
+    to frame_index()
+        let i be floor(me.time * me.fps)
+        if me.looping
+            give back i % length(me.frames)
+        end
+        give back min(i, length(me.frames) - 1)
+    end
+
+    to frame()
+        give back me.frames[me.frame_index()]
+    end
+
+    to done()
+        give back not me.looping and floor(me.time * me.fps) >= length(me.frames)
+    end
+
+    to restart()
+        change me.time to 0
+    end
+end
+
+# frames: a list of frame numbers, or a count (5 means frames 0, 1, 2, 3, 4)
+to animation(frames, fps be 8, looping be yes)
+    if is_number(frames)
+        change frames to range(0, frames)
+    end
+    give back new Animation(frames, fps, looping, 0)
+end
+
+# ------------------------------------------------------------------ scenes (title screen, game, game over ...)
+let game_scenes be {}
+let game_scene be nothing
+let game_scene_clock be 0
+
+# add_scene("title", title_update, title_draw): update takes dt, draw takes nothing (either may be nothing)
+to add_scene(name, update_fn, draw_fn)
+    change game_scenes at name to [update_fn, draw_fn]
+    if game_scene is nothing
+        change game_scene to name
+    end
+end
+
+to go_to_scene(name)
+    if not has_key(game_scenes, name)
+        fail("there's no scene called '{name}' - add it with add_scene first")
+    end
+    change game_scene to name
+    change game_scene_clock to 0
+end
+
+to scene_name()
+    give back game_scene
+end
+
+# seconds since the current scene started
+to scene_time()
+    give back game_scene_clock
+end
+
+to update_scene(dt)
+    if game_scene is nothing
+        give back nothing
+    end
+    change game_scene_clock to game_scene_clock + dt
+    let f be game_scenes[game_scene][0]
+    if f is not nothing
+        f(dt)
+    end
+end
+
+to draw_scene()
+    if game_scene is nothing
+        give back nothing
+    end
+    let f be game_scenes[game_scene][1]
+    if f is not nothing
+        f()
+    end
+end
+
+# ------------------------------------------------------------------ random helpers
+# a decimal between low and high
+to random_between(low, high)
+    give back low + random_float() * (high - low)
+end
+
+# yes with probability p (0.25 = one time in four)
+to random_chance(p)
+    give back random_float() < p
+end
+
+to random_sign()
+    if random(0, 1) is 0
+        give back -1
+    end
+    give back 1
+end
+
+# a bright random colour
+to random_color()
+    give back hsv(random(0, 359), 0.7, 1)
+end
+
+# ------------------------------------------------------------------ particles
+# Little dots that fly out, fall and fade: explosions, sparks, dust.
+#   let fx be particles()   fx.burst(x, y, 30, "orange")   fx.update(dt)   fx.draw()
+type Particles
+    has items
+    has gravity
+
+    to burst(x, y, count, colour, speed be 160, life be 0.8)
+        repeat count times
+            let angle be random_between(0, 360)
+            let s be random_between(speed * 0.3, speed)
+            let t be angle * pi / 180
+            add [x, y, cos(t) * s, sin(t) * s, life, life, colour, random_between(1.5, 3.5)] to me.items
+        end
+    end
+
+    to update(dt)
+        let alive be []
+        for each p in me.items
+            change p at 0 to p[0] + p[2] * dt
+            change p at 1 to p[1] + p[3] * dt
+            change p at 3 to p[3] + me.gravity * dt
+            change p at 4 to p[4] - dt
+            if p[4] > 0
+                add p to alive
+            end
+        end
+        change me.items to alive
+    end
+
+    to draw()
+        for each p in me.items
+            let fade be p[4] / p[5]
+            circle(p[0], p[1], p[7] * (0.5 + fade / 2), with_alpha(p[6], fade))
+        end
+    end
+
+    to count()
+        give back length(me.items)
+    end
+end
+
+to particles(gravity be 300)
+    give back new Particles([], gravity)
+end

@@ -1,0 +1,49 @@
+# using: a resource is closed at the end of the block, however the block ends.
+type Resource
+    has name
+    to setup(name)
+        change me.name to name
+        say "open {name}"
+    end
+    to close()
+        say "close {me.name}"
+    end
+end
+
+using r be new Resource("a")
+    say "working with {r.name}"
+end
+
+to early()
+    using r be new Resource("b")
+        give back "left early"
+    end
+end
+say early()
+
+attempt
+    using r be new Resource("c")
+        fail("something broke")
+    end
+rescue problem
+    say "rescued: " + problem
+end
+
+for each i in [1, 2, 3]
+    using r be new Resource("loop {i}")
+        if i is 2
+            stop
+        end
+    end
+end
+
+using nothing_here be nothing
+    say "nothing to close"
+end
+attempt
+    using n be 5
+        say "five"
+    end
+rescue problem
+    say problem
+end

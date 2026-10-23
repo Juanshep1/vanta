@@ -1,0 +1,168 @@
+# System (Vanta 6.0): processes with pipes, environment, file handles, folders, glob, temp files, paths, dates.
+
+# ---- run a command and capture everything ----
+let r be run_process("echo hello; echo oops 1>&2; exit 3")
+say r["output"]
+say r["error"]
+say r["code"]
+say run_process(["printf", "%s-%s", "a", "b"])["output"]
+say run_process("tr a-z A-Z", {"input": "shout this"})["output"]
+say run_process("pwd", {"dir": "/"})["output"]
+say run_process("echo $VANTA_TEST_VAR", {"env": {"VANTA_TEST_VAR": "from vanta"}})["output"]
+attempt
+    run_process("sleep 5", {"timeout": 0.2})
+rescue e
+    say e
+end
+attempt
+    run_process(["no-such-program-vanta"])
+rescue e
+    say starts_with(e, "could not run")
+end
+say run("echo combined")
+say shell("echo hi; exit 2")
+
+# ---- a long-running process, streaming both ways ----
+let p be open_process("while read line; do echo \"got: $line\"; done")
+write_to(p, "one\n")
+say read_line(p)
+write_to(p, "two\nthree\n")
+say read_line(p)
+say read_line(p)
+close_input(p)
+say read_line(p)
+say wait for p
+say is_done(p)
+say type_of(p)
+
+let q be open_process(["sh", "-c", "echo out; echo err 1>&2; exit 7"])
+say read_all(q)
+say process_errors(q)
+say wait(q)
+close(q)
+let m be open_process("echo a; echo b 1>&2", {"merge_errors": yes})
+say sort(lines(trim(read_all(m))))
+wait(m)
+
+# ---- environment ----
+set_env("VANTA_COLOR", "teal")
+say env("VANTA_COLOR")
+say env_vars()["VANTA_COLOR"]
+set_env("VANTA_COLOR", nothing)
+say env("VANTA_COLOR")
+say env("VANTA_COLOR", "none")
+say my_pid() > 0
+
+# ---- file handles: big files a line or a chunk at a time ----
+let dir be temp_dir()
+let path be path_join(dir, "notes.txt")
+let f be open_file(path, "write")
+write_to(f, "first line\n")
+write_to(f, "second line\r\n")
+write_to(f, "third")
+close(f)
+let g be open_file(path)
+say read_line(g)
+say read_line(g)
+say read_line(g)
+say read_line(g)
+seek(g, 6)
+say read_chunk(g, 4)
+say tell(g)
+seek(g, -5, "end")
+say read_all(g)
+seek(g, 0)
+say read_chunk_bytes(g, 3)
+close(g)
+attempt
+    read_line(g)
+rescue e
+    say e
+end
+using src be open_file(path)
+    say read_line(src)
+end
+attempt
+    read_line(src)
+rescue e
+    say e
+end
+let h be open_file(path, "append")
+write_to(h, "\nfourth")
+close(h)
+say lines(read_file(path))
+attempt
+    open_file(path_join(dir, "missing.txt"))
+rescue e
+    say starts_with(e, "could not open")
+end
+
+# ---- folders, walking, glob ----
+make_dir(path_join(dir, "src/lib"))
+write_file(path_join(dir, "src/main.va"), "say 1")
+write_file(path_join(dir, "src/lib/util.va"), "say 2")
+write_file(path_join(dir, "src/lib/data.csv"), "a,b")
+write_file(path_join(dir, "src/.hidden.va"), "")
+let found be walk_dir(path_join(dir, "src"))
+say [replace(x, dir, "") for each x in found]
+change_dir(dir)
+say glob("src/*.va")
+say glob("src/**/*.va")
+say glob("src/lib/[a-d]*")
+say glob("nothing/*")
+say matches_pattern("report-2026.txt", "report-*.txt")
+say matches_pattern("a.c", "*.[!c]")
+let tf be temp_file(".txt")
+say ends_with(tf, ".txt") and path_exists(tf)
+remove_path(tf)
+
+# ---- path helpers ----
+say path_join("a", "b", "c.txt")
+say path_join("a/", "/abs", "x")
+say dirname("/usr/local/bin/vanta")
+say basename("/usr/local/bin/vanta")
+say extname("archive.tar.gz")
+say extname(".bashrc")
+say absolute_path("/a/b/../c/./d")
+say ends_with(absolute_path("x/y"), "/x/y")
+say current_dir() is absolute_path(".")
+say file_mtime(path) > 0
+copy_path(path_join(dir, "src"), path_join(dir, "copy"))
+say length(walk_dir(path_join(dir, "copy")))
+move_path(path_join(dir, "copy"), path_join(dir, "moved"))
+say [path_exists(path_join(dir, "copy")), path_exists(path_join(dir, "moved/main.va"))]
+change_dir("/")
+remove_path(dir)
+say path_exists(dir)
+
+# ---- dates and times ----
+let stamp be make_date(2026, 10, 21, 14, 30, 5, "UTC")
+say stamp
+say format_date(stamp, "%Y-%m-%d %H:%M:%S", "UTC")
+say format_date(stamp, "%H:%M %Z", "America/New_York")
+say format_date(stamp, "%H:%M", "Asia/Tokyo")
+let parts be date_parts(stamp, "Europe/Paris")
+say [parts["year"], parts["month"], parts["day"], parts["hour"], parts["minute"], parts["second"]]
+say [parts["weekday"], parts["day_name"], parts["month_name"], parts["yearday"], parts["offset"]]
+say parse_date("2026-10-21 14:30", "%Y-%m-%d %H:%M", "UTC") is stamp - 5
+say parse_date("2026-01-01", "%Y-%m-%d", "UTC")
+say make_date(2024, 2, 30, 0, 0, 0, "UTC") is make_date(2024, 3, 1, 0, 0, 0, "UTC")
+say stamp + days(2) - hours(3) + minutes(15)
+say format_duration(days(1) + hours(2) + 5)
+say format_duration(90)
+say format_duration(0)
+say format_duration(-3600)
+attempt
+    format_date(stamp, "%Y", "Mars/Olympus")
+rescue e
+    say e
+end
+attempt
+    parse_date("21/10/2026", "%Y-%m-%d")
+rescue e
+    say e
+end
+say length(timezone()) > 0
+say length(today())
+
+say "system tests passed"

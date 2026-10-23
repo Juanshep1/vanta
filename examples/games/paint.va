@@ -1,0 +1,150 @@
+# PAINT - draw with the mouse (or your finger).
+# Pick a colour and a tool on the left. The mouse wheel or [ and ] change the brush size.
+# C clears the picture, S saves it as painting.png.
+#
+#   vanta run examples/games/paint.va
+
+window(800, 560, "Vanta Paint")
+
+fix bar_w be 90
+fix palette be ["#1d1d24", "#ffffff", "#ff4d4d", "#ff9f1c", "#ffd60a", "#3ddc84", "#2ec4f1", "#4361ee", "#9b5de5", "#f15bb5", "#8d6e63", "#9e9e9e"]
+fix tools be ["brush", "spray", "eraser", "line"]
+
+let picture be make_image(800 - bar_w, 560, "white")
+let colour be "#1d1d24"
+let tool be "brush"
+let size be 6
+let last_x be nothing
+let last_y be nothing
+let line_start be nothing
+let saved_note be 0
+
+to canvas_x()
+    give back mouse_x() - bar_w
+end
+
+to paint_at(x, y)
+    draw_to(picture)
+    match tool
+        when "brush"
+            line_width(size * 2)
+            if last_x is nothing
+                circle(x, y, size, colour)
+            otherwise
+                line(last_x, last_y, x, y, colour)
+            end
+        when "eraser"
+            line_width(size * 4)
+            if last_x is nothing
+                circle(x, y, size * 2, "white")
+            otherwise
+                line(last_x, last_y, x, y, "white")
+            end
+        when "spray"
+            repeat size * 2 times
+                let a be random_float() * 2 * pi
+                let r be random_float() * size * 3
+                rect(x + cos(a) * r, y + sin(a) * r, 2, 2, colour)
+            end
+    end
+    draw_to_screen()
+    line_width(1)
+end
+
+to on_frame()
+    # keys
+    if key_pressed("c")
+        draw_to(picture)
+        clear("white")
+        draw_to_screen()
+    end
+    if key_pressed("s")
+        save_image(picture, "painting.png")
+        change saved_note to 2
+    end
+    if key_pressed("]") or mouse_wheel() > 0
+        change size to min(size + 1, 40)
+    end
+    if key_pressed("[") or mouse_wheel() < 0
+        change size to max(size - 1, 1)
+    end
+    change saved_note to max(0, saved_note - delta_time())
+
+    # the toolbar
+    if mouse_pressed() and mouse_x() < bar_w
+        for each i, c in palette
+            let px be 10 + (i % 2) * 38
+            let py be 10 + floor(i / 2) * 38
+            if mouse_x() >= px and mouse_x() < px + 32 and mouse_y() >= py and mouse_y() < py + 32
+                change colour to c
+            end
+        end
+        for each i, t in tools
+            let ty be 250 + i * 40
+            if mouse_y() >= ty and mouse_y() < ty + 32
+                change tool to t
+            end
+        end
+    end
+
+    # painting
+    let x be canvas_x()
+    let y be mouse_y()
+    if mouse_down() and x >= 0
+        if tool is "line"
+            if line_start is nothing
+                change line_start to [x, y]
+            end
+        otherwise
+            paint_at(x, y)
+            change last_x to x
+            change last_y to y
+        end
+    otherwise
+        if line_start is not nothing
+            draw_to(picture)
+            line_width(size)
+            line(line_start[0], line_start[1], x, y, colour)
+            line_width(1)
+            draw_to_screen()
+            change line_start to nothing
+        end
+        change last_x to nothing
+        change last_y to nothing
+    end
+
+    # show everything
+    clear("#2b2d3a")
+    draw_image(picture, bar_w, 0)
+    if line_start is not nothing
+        line_width(size)
+        line(line_start[0] + bar_w, line_start[1], mouse_x(), mouse_y(), with_alpha(colour, 0.6))
+        line_width(1)
+    end
+    for each i, c in palette
+        let px be 10 + (i % 2) * 38
+        let py be 10 + floor(i / 2) * 38
+        round_rect(px, py, 32, 32, 6, c)
+        if c is colour
+            line_width(3)
+            outline_round_rect(px - 3, py - 3, 38, 38, 8, "#ffffff")
+            line_width(1)
+        end
+    end
+    font("sans")
+    for each i, t in tools
+        let ty be 250 + i * 40
+        round_rect(8, ty, 74, 32, 6, "#5b5bd6" if t is tool otherwise "#3a3c4e")
+        draw_text(t, 16, ty + 8, 15, "white")
+    end
+    draw_text("size {size}", 12, 420, 15, "#c8c8e0")
+    circle(45, 470, min(size, 30), colour)
+    if saved_note > 0
+        round_rect(bar_w + 10, 10, 210, 30, 8, "#000000a0")
+        draw_text("saved painting.png", bar_w + 22, 17, 15, "white")
+    end
+    # the brush outline under the mouse
+    if mouse_x() > bar_w and tool is not "line"
+        outline_circle(mouse_x(), mouse_y(), size * (2 if tool is "eraser" otherwise 1), "#00000060")
+    end
+end

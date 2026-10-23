@@ -333,4 +333,265 @@ stop                           break out of a loop
 # or  note                     a comment
 ```
 
+---
+
+## Page 6 — Vanta 6.0: the Rest of a Real Language
+
+Everything on this page works the same in the interpreter (`vanta run`) and in native builds
+(`vanta build`).
+
+### Modules with their own names
+```
+import "geometry" as geo          # geo.area(3), new geo.Circle(2)
+from "geometry" use area, Circle  # just those names, used directly
+import "helpers"                  # the old way: everything joins your program
+```
+Inside a module, mark what stays inside with `private`: `private to helper(x)`, `private let cache be {}`
+(also `private fix`, `private type`, `private kind`). `geo.helper` then says *'helper' is private to the
+module 'geometry'*. A module runs once, in its own scope; it can still see your program's globals and
+anything imported with a plain `import`. `type Ball from geo.Circle` inherits across modules. Vanta looks
+for a module as written, in `lib/`, in packages, and finally next to the file doing the importing.
+
+### Kinds: a fixed set of named values
+```
+kind Color is red, green, blue
+
+kind Direction
+    north, east
+    south, west
+end
+
+say Color.red                 # red
+say Color.red.index           # 0        (also .name -> "red")
+say Color.red < Color.blue    # yes      (they compare in the order listed)
+for each c in Color           # red, green, blue
+match paint
+    when Color.red
+        say "warm"
+end
+```
+`Color.red is a Color` is yes; kind values work as map keys and in sets; `length(Color)` is 3.
+
+### Generators: `yield`
+A function that uses `yield` hands out values one at a time, only as they're asked for:
+```
+to count_up(start, stop_at)
+    let n be start
+    while n is at most stop_at
+        yield n
+        increase n by 1
+    end
+end
+
+for each n in count_up(1, 3)      # 1 2 3
+say list(count_up(5, 8))          # [5, 6, 7, 8]
+let g be count_up(1, 2)
+say next(g)                       # 1
+say next(g, "done")               # 2, then "done" once it runs out (next(g) alone is an error then)
+```
+Endless generators are fine — stop asking (`stop` in the loop). `give back` inside a generator ends it.
+A type becomes loopable by defining `to each()` (which yields, or gives back a list).
+
+### Operators for your own types
+| Write        | Vanta calls          | Write             | Vanta calls          |
+|--------------|----------------------|-------------------|----------------------|
+| `a + b`      | `a.add(b)`           | `a is b`          | `a.equals(b)`        |
+| `a - b`      | `a.subtract(b)`      | `a < b`, `a > b`… | `a.less_than(b)`     |
+| `a * b`      | `a.multiply(b)`      | `a[i]`            | `a.index(i)`         |
+| `a / b`      | `a.divide(b)`        | `change a[i] to v`| `a.set_index(i, v)`  |
+| `a % b`      | `a.remainder(b)`     | `length(a)`       | `a.length()`         |
+| `-a`         | `a.negate()`         | `x is in a`       | `a.contains(x)`      |
+| `say a`, `text(a)`, `"{a}"` | `a.text()` (or `a.show()`) | `for each x in a` | `a.each()` |
+
+The object must be on the left of the operator. With `less_than`, `sort`, `min` and `max` work on objects.
+
+### Sets
+```
+let s be set([3, 1, 3])      # set([3, 1])  — each value once, in the order added
+add 5 to s
+remove 1 from s              # (remove also works on lists and maps)
+say 5 is in s                # yes
+say union(a, b), intersection(a, b), difference(a, b), is_subset(a, b)
+```
+`length`, `for each`, `list(s)`, `sum`, `sort`, `max`, `join` and the other list helpers accept sets.
+Lists and maps can't go in a set. `yes` and `1` are different items (and different map keys).
+
+### Taking values apart in `when`
+```
+match value
+    when []                          ...an empty list
+    when [first, rest...]            ...one or more: first, and a list of the rest
+    when [0, y]                      ...exactly two, the first being 0
+    when {"name": n, "age": a} if a is at least 18
+    when a Circle with radius        ...a type test, taking fields out
+    when a number                    ...also: a text, a list, a map, a set, a function, nothing
+    otherwise
+end
+```
+Inside `[ ]` and `{ }` a bare name takes the value (`_` ignores it); anything else is compared. Names are
+bound only when the whole pattern matches, and stay available afterwards.
+
+### `using`: closing things automatically
+```
+using f be open_thing("data.txt")
+    ...                              # f.close() runs at the end — even after an error, `give back` or `stop`
+end
+```
+
+### Optional type notes and `vanta check`
+```
+to area(r: number) -> number
+let name: text be "Ana"
+has age: number
+```
+Notes don't change how a program runs. `vanta check file.va` reads them and also reports names that don't
+exist (with a "did you mean"), calls with the wrong number or names of values, `change` of a missing or
+fixed name, module names that don't exist or are private, and kind values that don't exist.
+
+### Shared (type-level) values and methods
+```
+type Point
+    has x
+    has y
+    shared made be 0                  # Point.made
+    shared to origin()                # Point.origin()
+        give back new Point(0, 0)
+    end
+end
+```
+
+### Calls with names, and collecting the rest
+```
+to greet(name, greeting be "Hello", mark be "!")
+say greet("Bo", mark: "?")            # named values come after plain ones
+let d be new Dog(sound: "Woof", name: "Rex")
+to total(numbers...)                  # total(1, 2, 3): numbers is [1, 2, 3]
+```
+
+### Formatting inside text
+`"{value:spec}"` or `format(value, spec)`, where spec is `[[fill]align][0][width][,][.digits][type]`:
+`{price:.2}` two decimals, `{n:8}` width 8 (numbers right, text left), `{s:<10}` `{s:>10}` `{s:^10}`,
+`{s:*<10}` fill with `*`, `{n:,}` thousands, `{n:05}` zero-padded, `{n:x}` hex (`X b o` too), `{r:.1%}`
+percent, `{v:e}` scientific, `{s:.3}` cut text to 3 characters. Braces that don't hold an expression
+(like JSON) are left alone; `{{` and `}}` are literal braces.
+
+### Numbers
+Whole numbers never overflow — `factorial(25)` and `2 ^ 100` are exact everywhere. `7 // 2` is 3 (whole
+division, rounding down), `7 mod 2` is 1, `1e3` and `2.5e-4` are numbers, and comparisons chain:
+`1 is under x is under 10`.
+
+### Long lines
+A line that ends in an open bracket, an operator, or a comma continues on the next line:
+```
+let data be [
+    1, 2,
+    3,
+]
+let total be price +
+    tax
+```
+
+## Page 7 — Batteries Included: Tasks, Networks, Systems and Data (6.0)
+
+Vanta 6.0 ships the library a working programmer reaches for every day. Everything below works the same in the
+interpreter and in native builds (`vanta build`); [STDLIB.md](STDLIB.md) lists every function with an example.
+
+### Doing several things at once
+```
+to fetch(url)
+    give back http_get(url)["status"]
+end
+
+let a be start fetch("https://example.com")      # runs in the background
+let b be start fetch("https://example.org")
+say wait for [a, b]                              # [200, 200] — both downloads overlapped
+```
+`start CALL` runs a call as a *task*; `wait for` collects its result (an error inside the task is raised where you
+wait, so `attempt`/`rescue` works as usual). Tasks talk through *channels*:
+```
+let jobs be channel()
+to worker(jobs)
+    let job be receive from jobs
+    while job is not nothing                     # nothing = the channel was closed
+        say "doing " + job
+        change job to receive from jobs
+    end
+end
+let w be start worker(jobs)
+send "laundry" to jobs
+send "dishes" to jobs
+close(jobs)
+wait for w
+```
+When two tasks change the same thing, guard it with a `lock` block (`lock` alone uses one program-wide lock;
+`lock guard` uses a lock from `new_lock()`); the lock is let go however the block ends:
+```
+lock
+    change total to total + amount
+end
+```
+How it runs: one task runs Vanta code at a time, and a task that waits — `sleep`, the network, a process, a
+channel, a lock — lets the others run. That makes I/O-heavy programs fast without data races inside a single
+statement. For CPU-heavy work use `run_parallel(function, list)`, which spreads the list over every core in
+separate processes.
+
+### Talking to the network
+`tcp_connect`/`tcp_listen`/`accept` give *sockets*; `send x to sock`, `read_line(sock)`, `receive(sock)` and
+`close(sock)` use them. `udp_open`, `udp_send`, `udp_receive` do datagrams, `dns_lookup` resolves names, and
+`ws_connect` opens a WebSocket. A web server is a map of routes:
+```
+to hello(req)
+    give back "Hello, " + req["params"]["name"] + "!"
+end
+to add_note(req)
+    give back json_response({"saved": req["json"]["text"]}, 201)
+end
+serve(8080, {"GET /hello/:name": hello, "POST /notes": add_note, "GET /files/*": "public"})
+```
+`start_server(port, routes)` runs the same server in the background and gives back a handle for `server_port`
+and `stop_server`; a `"WS /path"` route turns a request into a WebSocket conversation.
+
+### Talking to the system
+```
+let r be run_process(["git", "log", "--oneline", "-3"])
+say r["output"]                                   # also r["error"], r["code"]
+
+let py be open_process("python3 -u -c 'import sys; [print(int(l) * 2) for l in sys.stdin]'")
+write_to(py, "21\n")
+say read_line(py)                                 # 42
+close(py)
+
+using f be open_file("huge.log")                  # a line at a time, however big the file
+    let line be read_line(f)
+    while line is not nothing
+        if contains(line, "ERROR")
+            say line
+        end
+        change line to read_line(f)
+    end
+end
+```
+Also: `walk_dir`, `glob("src/**/*.va")`, `temp_file`, `temp_dir`, `absolute_path`, `env`/`set_env`/`env_vars`,
+`on_signal`, `exit`.
+
+### Working with data
+CSV (`csv_read`, `csv_read_maps`, `csv_write`, ...), pretty JSON (`to_json(value, 2)`), dates with time zones
+(`make_date`, `date_parts`, `format_date(stamp, "%H:%M", "Asia/Tokyo")`, `days(3)`, `format_duration`), regular
+expressions (`regex_search`, `regex_split`, `replace_all` with `\\1` groups), compression (`gzip`, `compress`),
+hashes (`sha256`, `sha1`, `md5`, `hmac`), `uuid()`, repeatable randomness (`random_seed`), math and statistics
+(`gcd`, `factorial`, `isqrt`, `mean`, `median`, `stdev`), and SQLite databases:
+```
+let db be db_open("shop.db")
+db_execute(db, "create table if not exists items (name text, price real)")
+db_execute(db, "insert into items values (?, ?)", ["lamp", 19.5])
+for each row in db_query(db, "select * from items where price < ?", [50])
+    say row["name"] + " costs " + row["price"]
+end
+```
+
+### Modules in `lib/`
+`import "collections"` (Stack, Queue, Deque, Heap, PriorityQueue), `import "strings"` (wrap, slugify, snake_case,
+...), `import "cli"` (`parse_args` for command-line options) and `import "log"` (leveled logging) are written in
+Vanta itself.
+
 *Vanta — say what you mean.*

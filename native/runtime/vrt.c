@@ -5,6 +5,10 @@
 #include <string.h>
 #include <stdarg.h>
 #include <math.h>
+#if defined(__linux__)
+#include <sys/resource.h>
+#include <unistd.h>
+#endif
 
 int vrt_line = 0;              /* (file id << 20) | line */
 const char **vrt_file_names = NULL;
@@ -45,11 +49,22 @@ _Noreturn void vrt_fail(const char *fmt, ...) {
 void vrt_try_push(VTry *t) { t->prev = vrt_try; t->roots = vrt_roots_top(); vrt_try = t; }
 void vrt_try_pop(void) { if (vrt_try) vrt_try = vrt_try->prev; }
 V vrt_caught(void) { return vrt_cstr(vrt_errmsg); }
+_Noreturn void vrt_rethrow(void) {
+    char msg[1024];
+    snprintf(msg, sizeof msg, "%s", vrt_errmsg);
+    vrt_line = vrt_errline;
+    vrt_fail("%s", msg);
+}
 
 _Noreturn void vrt_unknown(const char *name) { vrt_fail("I don't know what '%s' is yet", name); }
 _Noreturn void vrt_no_var(const char *name) { vrt_fail("'%s' doesn't exist yet (use: let %s be ...)", name, name); }
 _Noreturn void vrt_fixed(const char *name) { vrt_fail("'%s' is fixed and can't be changed", name); }
 _Noreturn void vrt_missing_arg(const char *f, const char *p) { vrt_fail("'%s' is missing a value for '%s'", f, p); }
+void vrt_bind_check2(const char *fname, int argc, int nparams, int nrequired) {
+    if (argc <= nparams) return;
+    if (nparams == 0) vrt_fail("'%s' doesn't take any values, but got %d", fname, argc);
+    vrt_fail("'%s' takes %s%d %s, but got %d", fname, nrequired < nparams ? "at most " : "", nparams, nparams == 1 ? "value" : "values", argc);
+}
 void vrt_bind_check(const char *fname, int argc, int nparams) {
     if (argc > nparams) vrt_fail("'%s' takes at most %d value(s), but got %d", fname, nparams, argc);
 }
@@ -76,7 +91,10 @@ void *vrt_alloc(uint8_t type, size_t size) {
     return o;
 }
 
+#define VRT_MAX_DEPTH 200000     /* nested calls; the stack is made big enough for this (see vrt_init / vantac) */
 void vrt_root_push(VEnv *e) {
+    if (nroots >= VRT_MAX_DEPTH && nroots < VRT_MAX_DEPTH + 64)   /* room for the error handling itself */
+        vrt_fail("this went too deep: a function kept calling itself (is a stopping case missing?)");
     if (nroots == caproots) { caproots = caproots ? caproots * 2 : 1024; roots = realloc(roots, caproots * sizeof *roots); }
     roots[nroots++] = e;
 }
@@ -88,6 +106,23 @@ void vrt_pin(V v) {
     pins[npins++] = v;
 }
 void vrt_unpin(int n) { npins -= n; }
+
+/* Threads (see vrt_thread.c) park their roots here while another thread runs Vanta code. */
+void (*vrt_yield_hook)(void) = NULL;
+void (*vrt_mark_hook)(void) = NULL;
+void *(*vrt_blocking_begin_hook)(void) = NULL;
+void (*vrt_blocking_end_hook)(void *) = NULL;
+void vrt_save_state(VSavedState *s) {
+    s->roots = roots; s->nroots = nroots; s->caproots = caproots;
+    s->pins = pins; s->npins = npins; s->cappins = cappins;
+    s->try_ = vrt_try; s->line = vrt_line;
+}
+void vrt_restore_state(VSavedState *s) {
+    roots = s->roots; nroots = s->nroots; caproots = s->caproots;
+    pins = s->pins; npins = s->npins; cappins = s->cappins;
+    vrt_try = s->try_; vrt_line = s->line;
+}
+void vrt_fresh_state(void) { roots = NULL; nroots = caproots = 0; pins = NULL; npins = cappins = 0; vrt_try = NULL; }
 
 VEnv *vrt_env(VEnv *parent, int n) {
     VEnv *e = vrt_alloc(VT_ENV, sizeof(VEnv) + (size_t)n * sizeof(V));
@@ -105,6 +140,12 @@ static void mark_obj(VObj *o) {
     mstack[msp++] = o;
 }
 static inline void mark_v(V v) { if (v.t >= VT_STR && v.t != VT_PTR && v.u.o) mark_obj(v.u.o); }
+void vrt_mark(V v) { mark_v(v); }
+void vrt_mark_saved(VSavedState *s) {
+    VEnv **r = s->roots; V *p = s->pins;
+    for (int i = 0; i < s->nroots; i++) mark_obj(&r[i]->h);
+    for (int i = 0; i < s->npins; i++) mark_v(p[i]);
+}
 
 static void trace(VObj *o) {
     switch (o->type) {
@@ -112,10 +153,15 @@ static void trace(VObj *o) {
     case VT_MAP: { VMap *m = (VMap *)o; for (int64_t i = 0; i < m->nent; i++) if (m->ents[i].used) { mark_v(m->ents[i].key); mark_v(m->ents[i].val); } break; }
     case VT_ENV: { VEnv *e = (VEnv *)o; if (e->parent) mark_obj(&e->parent->h); for (int i = 0; i < e->n; i++) mark_v(e->s[i]); break; }
     case VT_FUNC: { VFunc *f = (VFunc *)o; if (f->env) mark_obj(&f->env->h); if (f->owner) mark_obj(&f->owner->h); break; }
-    case VT_TYPE: { VType *t = (VType *)o; if (t->parent) mark_obj(&t->parent->h); if (t->fields) mark_obj(&t->fields->h); if (t->methods) mark_obj(&t->methods->h); break; }
+    case VT_TYPE: { VType *t = (VType *)o; if (t->parent) mark_obj(&t->parent->h); if (t->fields) mark_obj(&t->fields->h); if (t->methods) mark_obj(&t->methods->h); if (t->shared) mark_obj(&t->shared->h); break; }
     case VT_OBJ: { VInst *i = (VInst *)o; mark_obj(&i->type->h); mark_obj(&i->attrs->h); break; }
     case VT_BOUND: { VBound *b = (VBound *)o; mark_v(b->inst); mark_obj(&b->fn->h); break; }
     case VT_SUPER: { VSuper *s = (VSuper *)o; mark_v(s->inst); if (s->parent) mark_obj(&s->parent->h); break; }
+    case VT_HANDLE: { VHandle *h = (VHandle *)o; if (h->trace) h->trace(h->data); break; }
+    case VT_GEN: { VGen *g = (VGen *)o; if (g->env) mark_obj(&g->env->h); break; }
+    case VT_MODULE: { VModule *m = (VModule *)o; if (m->env) mark_obj(&m->env->h); if (m->slots) mark_obj(&m->slots->h); break; }
+    case VT_ENUM: { VEnum *e = (VEnum *)o; if (e->members) mark_obj(&e->members->h); break; }
+    case VT_ENUMV: { VEnumV *m = (VEnumV *)o; mark_obj(&m->e->h); mark_v(m->name); break; }
     default: break;
     }
 }
@@ -126,6 +172,7 @@ static void free_obj(VObj *o) {
     case VT_MAP: free(((VMap *)o)->ents); free(((VMap *)o)->index); break;
     case VT_BYTES: free(((VBytes *)o)->data); break;
     case VT_ENV: free(((VEnv *)o)->consts); break;
+    case VT_HANDLE: if (((VHandle *)o)->finalize) ((VHandle *)o)->finalize(((VHandle *)o)->data); break;
     default: break;
     }
     free(o);
@@ -135,6 +182,8 @@ static void collect(void) {
     for (int i = 0; i < nroots; i++) mark_obj(&roots[i]->h);
     for (int i = 0; i < npins; i++) mark_v(pins[i]);
     if (vrt_globals) mark_obj(&vrt_globals->h);
+    if (vrt_mark_hook) vrt_mark_hook();
+    vrt_core_mark();
     while (msp > 0) trace(mstack[--msp]);
     VObj **p = &heap;
     size_t live = 0;
@@ -147,7 +196,28 @@ static void collect(void) {
     (void)live;
 }
 
-void vrt_safepoint(void) { if (allocated > threshold) collect(); }
+void vrt_safepoint(void) { if (vrt_yield_hook) vrt_yield_hook(); if (allocated > threshold) collect(); }
+
+V vrt_handle(const char *kind, void *data, void (*trace)(void *), void (*finalize)(void *)) {
+    VHandle *h = vrt_alloc(VT_HANDLE, sizeof(VHandle));
+    h->kind = kind; h->data = data; h->trace = trace; h->finalize = finalize;
+    return VO(VT_HANDLE, h);
+}
+int vrt_is_handle(V v, const char *kind) { return v.t == VT_HANDLE && !strcmp(((VHandle *)v.u.o)->kind, kind); }
+typedef struct { const char *kind, *op; VBuiltinPtr fn; } VOp;
+static VOp ops[128];
+static int nops = 0;
+void vrt_register_op(const char *kind, const char *op, VBuiltinPtr fn) { if (nops < 128) ops[nops++] = (VOp){kind, op, fn}; }
+VBuiltinPtr vrt_find_op(V h, const char *op) {
+    if (h.t != VT_HANDLE) return NULL;
+    const char *kind = ((VHandle *)h.u.o)->kind;
+    for (int i = 0; i < nops; i++) if (!strcmp(ops[i].op, op) && !strcmp(ops[i].kind, kind)) return ops[i].fn;
+    return NULL;
+}
+void *vrt_handle_data(V v, const char *kind, const char *fname) {
+    if (!vrt_is_handle(v, kind)) vrt_fail("%s needs a %s", fname, kind);
+    return ((VHandle *)v.u.o)->data;
+}
 
 /* =====================================================================================================
  * Text: UTF-8, with the character count kept so indexing and length work in characters like the interpreter.
@@ -218,6 +288,18 @@ static void display_into(Buf *b, V v, int quoted, int depth) {
     case VT_UNDEF: case VT_NIL: bputs(b, "nothing"); return;
     case VT_BOOL: bputs(b, v.u.i ? "yes" : "no"); return;
     case VT_INT: snprintf(tmp, sizeof tmp, "%lld", (long long)v.u.i); bputs(b, tmp); return;
+    case VT_BIG: { int64_t n; char *t = vrt_big_text(v, &n); bput(b, t, n); free(t); return; }
+    case VT_SET: {
+        VMap *m = AS_MAP(v); int first = 1;
+        bputs(b, "set([");
+        for (int64_t i = 0; i < m->nent; i++) if (m->ents[i].used) { if (!first) bputs(b, ", "); first = 0; display_into(b, m->ents[i].key, 1, depth + 1); }
+        bputs(b, "])");
+        return;
+    }
+    case VT_ENUMV: bput(b, AS_STR(((VEnumV *)v.u.o)->name)->data, AS_STR(((VEnumV *)v.u.o)->name)->len); return;
+    case VT_ENUM: bputs(b, "<kind "); bputs(b, ((VEnum *)v.u.o)->name); bputs(b, ">"); return;
+    case VT_GEN: bputs(b, "<generator "); bputs(b, ((VGen *)v.u.o)->name); bputs(b, ">"); return;
+    case VT_MODULE: bputs(b, "<module "); bputs(b, ((VModule *)v.u.o)->name); bputs(b, ">"); return;
     case VT_FLOAT: fmt_float(tmp, sizeof tmp, v.u.f); bputs(b, tmp); return;
     case VT_STR:
         if (quoted) bputs(b, "\"");
@@ -254,12 +336,13 @@ static void display_into(Buf *b, V v, int quoted, int depth) {
     case VT_BUILTIN: bputs(b, "<builtin "); bputs(b, ((VBuiltin *)v.u.o)->name); bputs(b, ">"); return;
     case VT_BOUND: bputs(b, "<method "); bputs(b, ((VBound *)v.u.o)->fn->name); bputs(b, ">"); return;
     case VT_TYPE: bputs(b, "<type "); bputs(b, ((VType *)v.u.o)->name); bputs(b, ">"); return;
+    case VT_HANDLE: bputs(b, "<"); bputs(b, ((VHandle *)v.u.o)->kind); bputs(b, ">"); return;
     case VT_OBJ: {
         VInst *in = AS_INST(v);
-        int found = 0;
-        V show = vrt_map_get(VO(VT_MAP, in->type->methods), vrt_cstr("show"), &found);
-        if (found) {
-            V r = ((VFunc *)show.u.o)->fn(((VFunc *)show.u.o)->env, 0, NULL, v, VNIL);
+        VFunc *show = vrt_method_of(v, "text");           /* a text() (or show()) method decides how it prints */
+        if (!show || show->nparams != 0) show = vrt_method_of(v, "show");
+        if (show && show->nparams == 0) {
+            V r = vrt_call_method(v, show, 0, NULL);
             display_into(b, r, 0, depth + 1);
             return;
         }
@@ -332,12 +415,15 @@ V vrt_list_of(int n, V *items) {
 static uint32_t hash_v(V k) {
     switch (k.t) {
     case VT_NIL: return 0x9e3779b9u;
-    case VT_BOOL: case VT_INT: { uint64_t x = (uint64_t)k.u.i; x ^= x >> 33; x *= 0xff51afd7ed558ccdULL; x ^= x >> 33; return (uint32_t)x; }
+    case VT_BOOL: return k.u.i ? 0x2f1a3b5du : 0x6c8e9cf5u;    /* yes/no are their own keys, not 1/0 */
+    case VT_INT: { uint64_t x = (uint64_t)k.u.i; x ^= x >> 33; x *= 0xff51afd7ed558ccdULL; x ^= x >> 33; return (uint32_t)x; }
     case VT_FLOAT: if (k.u.f == floor(k.u.f) && fabs(k.u.f) < 9e18) return hash_v(VI((int64_t)k.u.f)); { uint64_t x; memcpy(&x, &k.u.f, 8); x ^= x >> 31; return (uint32_t)(x * 0x9E3779B97F4A7C15ULL >> 32); }
     case VT_STR: return AS_STR(k)->hash;
     case VT_LIST: vrt_fail("a list can't be a map key");
     case VT_MAP: vrt_fail("a map can't be a map key");
     case VT_BYTES: vrt_fail("bytes can't be a map key");
+    case VT_SET: vrt_fail("a set can't be a map key");
+    case VT_BIG: return vrt_big_hash(k);
     default: return (uint32_t)((uintptr_t)k.u.o >> 4);
     }
 }
@@ -362,7 +448,7 @@ static int64_t map_find(VMap *m, V key, uint32_t h) {
     int64_t j = h & (m->icap - 1);
     while (m->index[j] >= 0) {
         VMapEnt *e = &m->ents[m->index[j]];
-        if (e->used && e->hash == h && vrt_equal(e->key, key)) return m->index[j];
+        if (e->used && e->hash == h && (e->key.t == VT_BOOL) == (key.t == VT_BOOL) && vrt_equal(e->key, key)) return m->index[j];
         j = (j + 1) & (m->icap - 1);
     }
     return -1;
@@ -428,14 +514,14 @@ int vrt_truthy(V v) {
     case VT_FLOAT: return v.u.f != 0;
     case VT_STR: return AS_STR(v)->len > 0;
     case VT_LIST: return AS_LIST(v)->len > 0;
-    case VT_MAP: return AS_MAP(v)->count > 0;
+    case VT_MAP: case VT_SET: return AS_MAP(v)->count > 0;
     case VT_BYTES: return AS_BYTES(v)->len > 0;
     default: return 1;
     }
 }
 
-static int is_num(V v) { return v.t == VT_INT || v.t == VT_FLOAT; }
-static double num(V v) { return v.t == VT_INT ? (double)v.u.i : v.u.f; }
+static int is_num(V v) { return v.t == VT_INT || v.t == VT_FLOAT || v.t == VT_BIG; }
+static double num(V v) { return v.t == VT_INT ? (double)v.u.i : v.t == VT_BIG ? vrt_big_to_double(v) : v.u.f; }
 
 static V concat_text(V a, V b) {
     V sa = vrt_display(a), sb = vrt_display(b);
@@ -453,6 +539,8 @@ static V concat_text(V a, V b) {
     return VO(VT_STR, o);
 }
 
+static int is_whole(V v) { return v.t == VT_INT || v.t == VT_BIG || (v.t == VT_FLOAT && v.u.f == floor(v.u.f) && fabs(v.u.f) < 9e18); }
+static V as_whole(V v) { return v.t == VT_FLOAT ? VI((int64_t)v.u.f) : v; }
 static int64_t whole(V v, const char *what) {
     if (v.t == VT_INT) return v.u.i;
     if (v.t == VT_FLOAT && v.u.f == floor(v.u.f)) return (int64_t)v.u.f;
@@ -461,7 +549,7 @@ static int64_t whole(V v, const char *what) {
 
 static const char *opname(int op) {
     switch (op) { case '+': return "+"; case '-': return "-"; case '*': return "*"; case '/': return "/"; case '%': return "%";
-    case '^': return "^"; case '&': return "&"; case '|': return "|"; case 'x': return "xor"; case '<': return "<<"; case '>': return ">>"; }
+    case '^': return "^"; case 'd': return "//"; case '&': return "&"; case '|': return "|"; case 'x': return "xor"; case '<': return "<<"; case '>': return ">>"; }
     return "?";
 }
 
@@ -481,7 +569,29 @@ static V repeat_value(V seq, int64_t n) {
 }
 
 V vrt_arith(int op, V a, V b) {
+    if (op == 'd') {                       /* a // b: whole-number division, rounding down (like Python) */
+        if (a.t == VT_INT && b.t == VT_INT) {
+            if (b.u.i == 0) vrt_fail("you can't divide by zero");
+            if (!(a.u.i == INT64_MIN && b.u.i == -1)) { int64_t q = a.u.i / b.u.i; if ((a.u.i % b.u.i != 0) && ((a.u.i < 0) != (b.u.i < 0))) q--; return VI(q); }
+        }
+        if ((a.t == VT_INT || a.t == VT_BIG) && (b.t == VT_INT || b.t == VT_BIG)) {
+            if (b.t == VT_INT && b.u.i == 0) vrt_fail("you can't divide by zero");
+            V r = vrt_big_arith('%', a, b);
+            return vrt_big_arith('/', vrt_big_arith('-', a, r), b);
+        }
+        if (is_num(a) && is_num(b)) {
+            if (num(b) == 0) vrt_fail("you can't divide by zero");
+            return VF(floor(num(a) / num(b)));
+        }
+        { V r; if (vrt_core_arith(op, a, b, &r)) return r; }
+        vrt_fail("I can only do math (//) with numbers");
+    }
     if (op == '&' || op == '|' || op == 'x' || op == '<' || op == '>') {
+        if ((a.t == VT_BIG || b.t == VT_BIG || op == '<') && is_whole(a) && is_whole(b)) {
+            if ((op == '<' || op == '>') && b.t == VT_BIG && vrt_big_cmp(b, VI(0)) < 0) vrt_fail("you can't shift by a negative amount");
+            if (b.t == VT_BIG && (op == '<' || op == '>')) { if (op == '>') return VI(vrt_big_cmp(a, VI(0)) < 0 ? -1 : 0); vrt_fail("that number is too big"); }
+            return vrt_big_arith(op, as_whole(a), as_whole(b));   /* whole numbers never overflow: they grow */
+        }
         int64_t x = whole(a, opname(op)), y = whole(b, opname(op));
         switch (op) {
         case '&': return VI(x & y);
@@ -494,9 +604,9 @@ V vrt_arith(int op, V a, V b) {
     if (a.t == VT_INT && b.t == VT_INT) {
         int64_t x = a.u.i, y = b.u.i, r;
         switch (op) {
-        case '+': if (!__builtin_add_overflow(x, y, &r)) return VI(r); return VF((double)x + (double)y);
-        case '-': if (!__builtin_sub_overflow(x, y, &r)) return VI(r); return VF((double)x - (double)y);
-        case '*': if (!__builtin_mul_overflow(x, y, &r)) return VI(r); return VF((double)x * (double)y);
+        case '+': if (!__builtin_add_overflow(x, y, &r)) return VI(r); return vrt_big_arith('+', a, b);
+        case '-': if (!__builtin_sub_overflow(x, y, &r)) return VI(r); return vrt_big_arith('-', a, b);
+        case '*': if (!__builtin_mul_overflow(x, y, &r)) return VI(r); return vrt_big_arith('*', a, b);
         case '/':
             if (y == 0) vrt_fail("you can't divide by zero");
             if (x % y == 0) return VI(x / y);
@@ -515,11 +625,13 @@ V vrt_arith(int op, V a, V b) {
                 e >>= 1;
                 if (e && __builtin_mul_overflow(base, base, &base)) { over = 1; break; }
             }
-            if (over) return VF(pow((double)x, (double)y));
+            if (over) return vrt_big_arith('^', a, b);
             return VI(res);
         }
         }
     }
+    if ((a.t == VT_BIG && (b.t == VT_INT || b.t == VT_BIG)) || (b.t == VT_BIG && a.t == VT_INT))
+        if (op == '+' || op == '-' || op == '*' || op == '/' || op == '%' || op == '^') return vrt_big_arith(op, a, b);
     if (is_num(a) && is_num(b)) {
         double x = num(a), y = num(b);
         switch (op) {
@@ -541,6 +653,7 @@ V vrt_arith(int op, V a, V b) {
         case '^': return VF(pow(x, y));
         }
     }
+    if (a.t == VT_OBJ) { V r; if (vrt_core_arith(op, a, b, &r)) return r; }
     if (op == '+') {
         if (a.t == VT_LIST && b.t == VT_LIST) {
             VList *x = AS_LIST(a), *y = AS_LIST(b);
@@ -555,12 +668,15 @@ V vrt_arith(int op, V a, V b) {
         if ((a.t == VT_STR || a.t == VT_LIST) && b.t == VT_INT) return repeat_value(a, b.u.i);
         if ((b.t == VT_STR || b.t == VT_LIST) && a.t == VT_INT) return repeat_value(b, a.u.i);
     }
+    { V r; if (vrt_core_arith(op, a, b, &r)) return r; }   /* money + other -> money.add(other) */
     vrt_fail("I can only do math (%s) with numbers", opname(op));
 }
 
 V vrt_neg(V a) {
-    if (a.t == VT_INT) return a.u.i == INT64_MIN ? VF(9223372036854775808.0) : VI(-a.u.i);
+    if (a.t == VT_INT) return a.u.i == INT64_MIN ? vrt_big_neg(a) : VI(-a.u.i);
     if (a.t == VT_FLOAT) return VF(-a.u.f);
+    if (a.t == VT_BIG) return vrt_big_neg(a);
+    if (a.t == VT_OBJ) return vrt_negate_obj(a);
     vrt_fail("only numbers can be negative");
 }
 V vrt_bitnot(V a) {
@@ -573,18 +689,24 @@ V vrt_compare(int op, V a, V b) {
     int c;
     if (is_num(a) && is_num(b)) {
         if (a.t == VT_INT && b.t == VT_INT) c = a.u.i < b.u.i ? -1 : a.u.i > b.u.i;
+        else if (a.t != VT_FLOAT && b.t != VT_FLOAT) c = vrt_big_cmp(a, b);
         else { double x = num(a), y = num(b); c = x < y ? -1 : x > y; }
     } else if (a.t == VT_STR && b.t == VT_STR) {
         VStr *x = AS_STR(a), *y = AS_STR(b);
         int64_t n = x->len < y->len ? x->len : y->len;
         int r = memcmp(x->data, y->data, (size_t)n);
         c = r < 0 ? -1 : r > 0 ? 1 : (x->len < y->len ? -1 : x->len > y->len);
-    } else vrt_fail("I can only compare numbers with numbers, or text with text");
+    } else { V r; if (vrt_core_compare(op, a, b, &r)) return r; vrt_fail("I can only compare numbers with numbers, or text with text"); }
     switch (op) { case '<': return VB(c < 0); case '>': return VB(c > 0); case 'l': return VB(c <= 0); default: return VB(c >= 0); }
 }
 
 int vrt_equal(V a, V b) {
     int an = a.t == VT_INT || a.t == VT_FLOAT || a.t == VT_BOOL, bn = b.t == VT_INT || b.t == VT_FLOAT || b.t == VT_BOOL;
+    if (a.t == VT_BIG || b.t == VT_BIG) {
+        if (a.t == VT_BIG && b.t == VT_BIG) return vrt_big_cmp(a, b) == 0;
+        if ((a.t == VT_FLOAT && b.t == VT_BIG) || (a.t == VT_BIG && b.t == VT_FLOAT)) return num(a) == num(b);
+        return 0;                 /* bigs never fit an int64, so never equal one */
+    }
     if (an && bn) {
         if (a.t != VT_FLOAT && b.t != VT_FLOAT) return a.u.i == b.u.i;
         return num(a.t == VT_BOOL ? VI(a.u.i) : a) == num(b.t == VT_BOOL ? VI(b.u.i) : b);
@@ -600,7 +722,8 @@ int vrt_equal(V a, V b) {
         for (int64_t i = 0; i < x->len; i++) if (!vrt_equal(x->items[i], y->items[i])) return 0;
         return 1;
     }
-    case VT_MAP: {
+    case VT_OBJ: return a.u.o == b.u.o || vrt_obj_equal(a, b);
+    case VT_SET: case VT_MAP: {
         VMap *x = AS_MAP(a), *y = AS_MAP(b);
         if (x == y) return 1;
         if (x->count != y->count) return 0;
@@ -618,7 +741,7 @@ int vrt_equal(V a, V b) {
 
 V vrt_in(V item, V coll) {
     if (coll.t == VT_LIST) { VList *l = AS_LIST(coll); for (int64_t i = 0; i < l->len; i++) if (vrt_equal(item, l->items[i])) return VTRUE; return VFALSE; }
-    if (coll.t == VT_MAP) { int f = 0; if (item.t == VT_LIST || item.t == VT_MAP) return VFALSE; vrt_map_get(coll, item, &f); return VB(f); }
+    if (coll.t == VT_MAP) { int f = 0; if (item.t == VT_LIST || item.t == VT_MAP || item.t == VT_SET) return VFALSE; vrt_map_get(coll, item, &f); return VB(f); }
     if (coll.t == VT_STR) {
         if (item.t != VT_STR) vrt_fail("'in <string>' requires string as left operand");
         VStr *h = AS_STR(coll), *n = AS_STR(item);
@@ -626,24 +749,29 @@ V vrt_in(V item, V coll) {
         for (int64_t i = 0; i + n->len <= h->len; i++) if (memcmp(h->data + i, n->data, (size_t)n->len) == 0) return VTRUE;
         return VFALSE;
     }
-    vrt_fail("'in' needs a list, text, or map on the right side");
+    { V r = vrt_core_in(item, coll); if (r.t != VT_UNDEF) return r; }
+    vrt_fail("'in' needs a list, text, map, or set on the right side");
 }
 
 V vrt_isa(V a, V type) {
+    if (type.t == VT_ENUM) return VB(a.t == VT_ENUMV && ((VEnumV *)a.u.o)->e == (VEnum *)type.u.o);
     if (type.t != VT_TYPE) vrt_fail("the right side of 'is a' must be a type");
     if (a.t != VT_OBJ) return VFALSE;
     for (VType *t = AS_INST(a)->type; t; t = t->parent) if (t == (VType *)type.u.o) return VTRUE;
     return VFALSE;
 }
 
+static const char *empty_kind = "list";
 static int64_t whole_index(V idx, int64_t len) {
     if (idx.t != VT_INT) vrt_fail("a position must be a whole number");
+    if (len == 0) vrt_fail("the %s is empty", empty_kind);
     int64_t i = idx.u.i, r = i < 0 ? i + len : i;
     if (r < 0 || r >= len) vrt_fail("position %lld is outside the range -%lld..%lld", (long long)i, (long long)len, (long long)(len - 1));
     return r;
 }
 
 V vrt_index(V coll, V idx) {
+    empty_kind = coll.t == VT_STR ? "text" : coll.t == VT_BYTES ? "bytes" : "list";
     switch (coll.t) {
     case VT_LIST: return AS_LIST(coll)->items[whole_index(idx, AS_LIST(coll)->len)];
     case VT_BYTES: return VI(AS_BYTES(coll)->data[whole_index(idx, AS_BYTES(coll)->len)]);
@@ -653,11 +781,16 @@ V vrt_index(V coll, V idx) {
         if (!f) { V d = vrt_display_item(idx); vrt_fail("this map has no key %s", AS_STR(d)->data); }
         return v;
     }
-    default: vrt_fail("you can only look inside a list, text, or map");
+    default: {
+        VFunc *fn = vrt_method_of(coll, "index");       /* obj[i] -> obj.index(i) */
+        if (fn) { vrt_pin(coll); vrt_pin(idx); V r = vrt_call_method(coll, fn, 1, &idx); vrt_unpin(2); return r; }
+        vrt_fail("you can only look inside a list, text, or map");
+    }
     }
 }
 
 void vrt_set_index(V coll, V idx, V val) {
+    empty_kind = coll.t == VT_BYTES ? "bytes" : "list";
     switch (coll.t) {
     case VT_LIST: AS_LIST(coll)->items[whole_index(idx, AS_LIST(coll)->len)] = val; return;
     case VT_MAP: vrt_map_set(coll, idx, val); return;
@@ -665,7 +798,11 @@ void vrt_set_index(V coll, V idx, V val) {
         if (val.t != VT_INT || val.u.i < 0 || val.u.i > 255) vrt_fail("a byte must be a whole number from 0 to 255");
         AS_BYTES(coll)->data[whole_index(idx, AS_BYTES(coll)->len)] = (uint8_t)val.u.i;
         return;
-    default: vrt_fail("you can only change a position inside a list or map");
+    default: {
+        VFunc *fn = vrt_method_of(coll, "set_index");   /* change obj[i] to v -> obj.set_index(i, v) */
+        if (fn) { V args[2] = {idx, val}; vrt_pin(coll); vrt_pin(idx); vrt_pin(val); vrt_call_method(coll, fn, 2, args); vrt_unpin(3); return; }
+        vrt_fail("you can only change a position inside a list or map");
+    }
     }
 }
 
@@ -718,10 +855,11 @@ V vrt_getattr(V obj, V name) {
         if (f) { VBound *b = vrt_alloc(VT_BOUND, sizeof(VBound)); b->inst = obj; b->fn = (VFunc *)m.u.o; return VO(VT_BOUND, b); }
         vrt_fail("a %s has no '%s'", in->type->name, vrt_cs(name));
     }
-    vrt_fail("you can only use '.' on an object made from a type");
+    return vrt_core_getattr(obj, name);
 }
 void vrt_setattr(V obj, V name, V val) {
     if (obj.t == VT_OBJ) { vrt_map_set(VO(VT_MAP, AS_INST(obj)->attrs), name, val); return; }
+    if (vrt_core_setattr(obj, name, val)) return;
     vrt_fail("you can only set a '.' field on an object made from a type");
 }
 
@@ -731,7 +869,7 @@ V vrt_iter_list(V v) {
     case VT_STR: { VStr *s = AS_STR(v); V r = vrt_list(s->nchars); for (int64_t i = 0; i < s->nchars; i++) vrt_list_push(r, vrt_str_index(s, i)); return r; }
     case VT_MAP: { VMap *m = AS_MAP(v); V r = vrt_list(m->count); for (int64_t i = 0; i < m->nent; i++) if (m->ents[i].used) vrt_list_push(r, m->ents[i].key); return r; }
     case VT_BYTES: { VBytes *y = AS_BYTES(v); V r = vrt_list(y->len); for (int64_t i = 0; i < y->len; i++) vrt_list_push(r, VI(y->data[i])); return r; }
-    default: vrt_fail("you can only loop over a list, text, map, or bytes");
+    default: return vrt_core_iter(v);           /* sets, kinds, generators, objects with each() */
     }
 }
 V vrt_iter_pairs(V v) {
@@ -747,7 +885,7 @@ V vrt_iter_pairs(V v) {
         for (int64_t i = 0; i < l->len; i++) { V p[2] = {VI(i), l->items[i]}; vrt_list_push(r, vrt_list_of(2, p)); }
         return r;
     }
-    vrt_fail("looping with two names needs a map, list, or text");
+    return vrt_core_iter_pairs(v);
 }
 
 V vrt_unpack(V v, int count) {
@@ -768,6 +906,10 @@ V vrt_func(const char *name, VFnPtr fn, VEnv *env) {
 V vrt_builtin(const char *name, VBuiltinPtr fn) {
     VBuiltin *b = vrt_alloc(VT_BUILTIN, sizeof(VBuiltin));
     b->name = name; b->fn = fn; b->h.perm = 1;
+    static const char *list_builtins[] = {"sum", "product", "min", "max", "sort", "sort_by", "join", "map", "keep", "reduce", "each",
+        "count_where", "find_where", "any_where", "all_where", "first", "last", "unique", "reverse", "zip", "flatten", "chunk",
+        "shuffle", "pick", "index_of", "last_index_of", NULL};
+    for (int i = 0; list_builtins[i]; i++) if (!strcmp(list_builtins[i], name)) b->sets_ok = 1;
     return VO(VT_BUILTIN, b);
 }
 
@@ -801,11 +943,22 @@ static V call_method(V inst, VFunc *fn, int argc, V *argv) {
     s->parent = fn->owner ? fn->owner->parent : NULL;
     return fn->fn(fn->env, argc, argv, inst, VO(VT_SUPER, s));
 }
+V vrt_call_method(V inst, VFunc *fn, int argc, V *argv) { return call_method(inst, fn, argc, argv); }
 
 V vrt_call(V callee, int argc, V *argv) {
     switch (callee.t) {
     case VT_FUNC: { VFunc *f = (VFunc *)callee.u.o; return f->fn(f->env, argc, argv, VNIL, VNIL); }
-    case VT_BUILTIN: return ((VBuiltin *)callee.u.o)->fn(argc, argv);
+    case VT_BUILTIN: {
+        VBuiltin *bi = (VBuiltin *)callee.u.o;
+        if (bi->sets_ok) for (int i = 0; i < argc; i++) if (argv[i].t == VT_SET) {   /* list builtins take sets as lists */
+            V *conv = malloc(sizeof(V) * (size_t)(argc ? argc : 1));
+            for (int j = 0; j < argc; j++) { conv[j] = argv[j].t == VT_SET ? vrt_iter_list(argv[j]) : argv[j]; vrt_pin(conv[j]); }
+            V r = bi->fn(argc, conv);
+            vrt_unpin(argc); free(conv);
+            return r;
+        }
+        return bi->fn(argc, argv);
+    }
     case VT_BOUND: { VBound *b = (VBound *)callee.u.o; return call_method(b->inst, b->fn, argc, argv); }
     case VT_TYPE: {
         VType *t = (VType *)callee.u.o;
@@ -840,7 +993,9 @@ V vrt_ask(V prompt) {
     if (prompt.t != VT_UNDEF) { V s = vrt_display(prompt); if (AS_STR(s)->len) { fputs(AS_STR(s)->data, stdout); fputc(' ', stdout); } }
     fflush(stdout);
     char line[4096];
-    if (!fgets(line, sizeof line, stdin)) { fflush(stdout); exit(1); }   /* no more input: the interpreter stops here too */
+    char *got;
+    { VRT_BLOCKING_BEGIN(); got = fgets(line, sizeof line, stdin); VRT_BLOCKING_END(); }
+    if (!got) vrt_fail("there was no answer to 'ask' (the input ended)");
     size_t n = strlen(line);
     while (n && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = 0;
     char *end;
@@ -854,5 +1009,16 @@ V vrt_ask(V prompt) {
 void vrt_init(int argc, char **argv) {
     vrt_argc = argc;
     vrt_argv = argv;
+#if defined(__linux__)
+    {   /* deep recursion needs a big stack: raise the limit and start again once (macOS: set at link time) */
+        struct rlimit rl;
+        if (!getenv("VANTA_STACK_SET") && getrlimit(RLIMIT_STACK, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY && rl.rlim_cur < (512UL << 20)) {
+            rlim_t want = (512UL << 20);
+            if (rl.rlim_max != RLIM_INFINITY && rl.rlim_max < want) want = rl.rlim_max;
+            rl.rlim_cur = want;
+            if (setrlimit(RLIMIT_STACK, &rl) == 0) { setenv("VANTA_STACK_SET", "1", 1); execv("/proc/self/exe", argv); }
+        }
+    }
+#endif
     setvbuf(stdout, NULL, _IOFBF, 1 << 16);
 }

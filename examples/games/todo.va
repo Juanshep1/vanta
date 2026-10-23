@@ -1,0 +1,120 @@
+# TO-DO - a small desktop app built with the gui library (lib/gui.va).
+# Type a task and press Enter (or click Add). Tick tasks off, delete them with x,
+# filter the list, and save it to todo.json next to where you run the program.
+#
+#   vanta run examples/games/todo.va
+
+import "gui"
+
+window(480, 600, "To-Do", {"follow": yes})
+
+let todos be []            # each one is {"text": ..., "done": yes/no}
+let entry be ""
+let filter be "all"
+let scroll be 0
+let note be ""
+let note_time be 0
+
+if path_exists("todo.json")
+    change todos to from_json(read_file("todo.json"))
+otherwise
+    add {"text": "Learn Vanta", "done": yes} to todos
+    add {"text": "Make a game", "done": no} to todos
+    add {"text": "Write a book chapter", "done": no} to todos
+end
+
+to add_entry()
+    if length(trim(entry)) > 0
+        add {"text": trim(entry), "done": no} to todos
+        change entry to ""
+    end
+end
+
+to visible(t)
+    if filter is "active"
+        give back not t["done"]
+    end
+    if filter is "done"
+        give back t["done"]
+    end
+    give back yes
+end
+
+to on_frame()
+    let w be screen_width()
+    let h be screen_height()
+    gui_background()
+    label("To-Do", 20, 18, 30)
+    let left be count_where(make t give not t["done"], todos)
+    label("{left} left", w - 90, 28, 16, gui_color("dim"))
+
+    # the new-task row
+    change entry to text_field("new", entry, 20, 64, w - 130, 38, "What needs doing?")
+    if submitted("new")
+        add_entry()
+        focus("new")
+    end
+    if accent_button("Add", w - 100, 64, 80, 38)
+        add_entry()
+    end
+
+    # filters
+    layout(20, 116, w - 40, 8)
+    row(32, 3)
+    for each f in ["all", "active", "done"]
+        let name be capitalize(f) + ("  *" if filter is f otherwise "")
+        if button(name + "##" + f, cell())
+            change filter to f
+        end
+    end
+
+    # the list (scrolls with the mouse wheel when it's long)
+    let top be 164
+    let bottom be h - 64
+    let item_h be 44
+    let shown be keep(visible, todos)
+    let most be max(0, length(shown) * item_h - (bottom - top))
+    change scroll to clamp(scroll - mouse_wheel() * 30, 0, most)
+    clip(0, top, w, bottom - top)
+    let remove be nothing
+    for each i, t in shown
+        let y be top + i * item_h - scroll
+        if y + item_h < top or y > bottom
+            skip
+        end
+        round_rect(20, y, w - 40, item_h - 6, 8, gui_color("panel"))
+        let id be index_of(todos, t)
+        change t at "done" to checkbox(t["text"] + "##" + text(id), t["done"], 32, y + 6)
+        if t["done"]
+            let tw be text_width(t["text"], 16)
+            line(62, y + item_h / 2 - 3, 62 + tw, y + item_h / 2 - 3, gui_color("dim"))
+        end
+        if button("x##del" + text(id), w - 64, y + 5, 34, item_h - 16)
+            change remove to id
+        end
+    end
+    no_clip()
+    if remove is not nothing
+        remove_at(todos, remove)
+    end
+    if length(shown) is 0
+        label("Nothing here.", 20, top + 10, 16, gui_color("dim"))
+    end
+
+    # bottom bar
+    layout(20, h - 52, w - 40, 8)
+    row(36, 3)
+    if button("Clear done", cell())
+        change todos to keep(make t give not t["done"], todos)
+    end
+    cell()
+    if button("Save", cell())
+        write_file("todo.json", to_json(todos))
+        change note to "saved todo.json"
+        change note_time to 2
+    end
+    change note_time to max(0, note_time - delta_time())
+    if note_time > 0
+        label(note, w / 2 - 60, h - 44, 14, gui_color("dim"))
+    end
+end

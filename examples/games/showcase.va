@@ -1,0 +1,121 @@
+# SHOWCASE - a tour of the canvas: shapes, colours, transparency, text in several
+# sizes and fonts, images that turn and scale, an off-screen picture, and a zooming camera.
+# Move the mouse around; press F11 for full screen.
+#
+#   vanta run examples/games/showcase.va
+
+window(720, 480, "Vanta Canvas Showcase")
+
+# a little image made from text, and a bigger picture drawn off-screen once
+let gem be image_from_rows("""
+    ...kkkk...
+    ..kwwcck..
+    .kwccccck.
+    kcccccccbk
+    kccccccbbk
+    .kccccbbk.
+    ..kccbbk..
+    ...kbbk...
+    ....kk....
+""", {"k": "#20203a", "w": "#ffffff", "c": "#5ee7ff", "b": "#2f8cff"})
+
+let badge be make_image(120, 120)
+draw_to(badge)
+for each i in range(0, 12)
+    pie(60, 60, 58, i * 30, i * 30 + 15, hsv(i * 30, 0.6, 1))
+end
+circle(60, 60, 34, "#1b1b2a")
+font("bold")
+text_align("center")
+draw_text("VANTA", 60, 52, 16, "white")
+text_align("left")
+font(nothing)
+draw_to_screen()
+
+let sans be load_font("sans")
+
+to star(cx, cy, r1, r2, turn)
+    let pts be []
+    for each i in range(0, 10)
+        let r be r1 if i % 2 is 0 otherwise r2
+        let a be (i * 36 + turn - 90) * pi / 180
+        add [cx + cos(a) * r, cy + sin(a) * r] to pts
+    end
+    give back pts
+end
+
+to on_frame()
+    let t be game_time()
+    # background gradient
+    for each i in range(0, 24)
+        rect(0, i * 20, 720, 20, mix_color("#1a1033", "#0b3a5a", i / 23))
+    end
+
+    # shapes, row 1
+    rect(20, 20, 90, 60, "#ff6b6b")
+    outline_rect(130, 20, 90, 60, "#ffd93d")
+    round_rect(240, 20, 90, 60, 16, "#6bcb77")
+    line_width(4)
+    outline_round_rect(350, 20, 90, 60, 16, "#4d96ff")
+    line_width(1)
+    circle(500, 50, 30, "#c77dff")
+    outline_circle(580, 50, 30, "#ffffff")
+    ellipse(660, 50, 40, 22, "#ff9f1c")
+
+    # row 2: triangles, polygons, lines, arcs
+    triangle(20, 170, 65, 100, 110, 170, "#00f5d4")
+    outline_triangle(130, 170, 175, 100, 220, 170, "#f15bb5")
+    polygon(star(290, 135, 38, 16, t * 60), "#fee440")
+    outline_polygon(star(390, 135, 38, 16, -t * 60), "#9b5de5")
+    line_width(3)
+    arc(490, 135, 32, 0, 270, "#00bbf9")
+    line_width(1)
+    pie(580, 135, 32, 30 + sin(t * 4) * 25, 330 - sin(t * 4) * 25, "#ffd60a")
+    let wave be []
+    for each i in range(0, 21)
+        add [630 + i * 4, 135 + sin(t * 3 + i / 2) * 20] to wave
+    end
+    line_width(2)
+    polyline(wave, "#80ffdb")
+    line_width(1)
+
+    # transparency
+    circle(70, 250, 40, "#ff000090")
+    circle(110, 250, 40, "#00ff0090")
+    circle(90, 285, 40, "#0000ff90")
+
+    # images: scaled, turning, flipped, faded
+    draw_image(gem, 180, 210, {"scale": 4})
+    draw_image(gem, 290, 250, {"scale": 5, "rotation": t * 90, "center": yes})
+    draw_image(gem, 340, 210, {"scale": 4, "flip_x": yes, "alpha": 0.4 + 0.4 * sin(t * 3)})
+    draw_image(badge, 420, 190, {"rotation": t * -30})
+
+    # text: the built-in pixel font and TTF fonts in several sizes
+    font(nothing)
+    draw_text("pixel 8", 570, 200, 8, "white")
+    draw_text("pixel 16", 570, 216, 16, "white")
+    draw_text("px 24", 570, 240, 24, "white")
+    if sans is not nothing
+        font(sans)
+        draw_text("Sans 14", 570, 275, 14, "#e0e0ff")
+        draw_text("Sans 22", 570, 293, 22, "#e0e0ff")
+    end
+    font(nothing)
+
+    # a little world seen through a zooming camera, inside a clipped window
+    let zoom be 1.5 + sin(t) * 0.5
+    round_rect(20, 330, 680, 130, 10, "#00000060")
+    clip(25, 335, 670, 120)
+    camera(sin(t * 0.7) * 100 - 360 / zoom, -395 / zoom, zoom)
+    for each i in range(-8, 9)
+        rect(i * 40 - 15, -10, 30, 30, hsv(i * 20 + 180, 0.5, 0.9))
+        circle(i * 40, -25, 6, "white")
+    end
+    no_camera()
+    no_clip()
+    draw_text("camera zoom {round(zoom, 2)}", 30, 444, 8, "white")
+
+    # the mouse
+    circle(mouse_x(), mouse_y(), 6, "#ffffffa0")
+    draw_text("{fps()} fps", 650, 465, 8, "#ffffff80")
+end

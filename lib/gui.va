@@ -1,0 +1,404 @@
+# Immediate-mode GUI widgets drawn on the canvas: buttons, labels, checkboxes,
+# sliders, text fields, lists, panels and simple row/column layout.   import "gui"
+#
+# "Immediate mode" means you call the widgets every frame, inside on_frame()
+# (or draw()), and they tell you what happened right away:
+#
+#     if button("Save", 20, 20, 100, 32)
+#         save_it()
+#     end
+#     change volume to slider("volume", volume, 0, 100, 20, 70, 200)
+#
+# Every widget takes its position as x, y, width, height - or as one cell from the
+# layout helpers:  layout(20, 20, 300)  row(40, 3)  button("A", cell())
+# A widget's label (or the id you give it) must be unique among the widgets on screen.
+# See docs/GRAPHICS.md for every widget.
+
+let gui_theme_colors be {}
+let gui_size be 16
+let gui_font_tried be no
+let gui_active be nothing        # the widget the mouse is holding down
+let gui_focus be nothing         # the text field being typed into
+let gui_submitted_id be nothing  # the text field Enter was pressed in this frame
+let gui_frame be -1
+let gui_press_claimed be no
+let gui_last_press be no
+let gui_cursor_x be 0            # layout
+let gui_cursor_y be 0
+let gui_row_y be 0
+let gui_row_h be 0
+let gui_row_cols be 1
+let gui_row_col be 0
+let gui_layout_x be 0
+let gui_layout_w be 300
+let gui_gap be 8
+let gui_scroll be {}
+
+to gui_theme(name be "dark")
+    if name is "light"
+        change gui_theme_colors to {"bg": "#f3f3f7", "panel": "#ffffff", "title": "#e4e4ee", "widget": "#e6e6ef", "hover": "#d9d9e8", "press": "#c4c4dc", "accent": "#5b4cf0", "text": "#1d1d29", "dim": "#6a6a80", "border": "#c8c8d8", "field": "#ffffff", "select": "#dcd8ff"}
+    otherwise
+        change gui_theme_colors to {"bg": "#16161f", "panel": "#21212e", "title": "#2b2b3c", "widget": "#33334a", "hover": "#3f3f5a", "press": "#4d4d70", "accent": "#7c6cff", "text": "#f0f0f6", "dim": "#9a9ab2", "border": "#47475f", "field": "#191924", "select": "#3d3670"}
+    end
+end
+
+# a colour of the current theme: gui_color("accent"), gui_color("bg") ...
+to gui_color(name)
+    if length(gui_theme_colors) is 0
+        gui_theme("dark")
+    end
+    give back gui_theme_colors[name]
+end
+
+to gui_text_size(size)
+    change gui_size to size
+end
+
+# once per frame, before the first widget: forget a press nobody claimed, pick the font
+to gui_tick()
+    let f be frame_count()
+    if f is gui_frame
+        give back nothing
+    end
+    change gui_frame to f
+    if not gui_font_tried
+        change gui_font_tried to yes
+        touch_controls(no)
+    end
+    font("sans")
+    if not mouse_down() and not mouse_released()
+        change gui_active to nothing
+    end
+    # last frame's press, if no text field claimed it, takes the focus away
+    if gui_last_press and not gui_press_claimed and gui_focus is not nothing
+        change gui_focus to nothing
+        show_keyboard(no)
+    end
+    change gui_last_press to mouse_pressed()
+    change gui_press_claimed to no
+    change gui_submitted_id to nothing
+end
+
+# the visible part of a label: "Delete##7" shows "Delete" (the whole text is still the widget's id)
+to gui_shown(label)
+    let cut be find(label, "##")
+    if cut is nothing or cut < 0
+        give back label
+    end
+    give back label[0:cut]
+end
+
+# widgets take x, y, w, h or one cell [x, y, w, h] in place of x
+to gui_box(x, y, w, h, default_w, default_h)
+    if is_list(x)
+        give back x
+    end
+    give back [x, y, w if w is not nothing otherwise default_w, h if h is not nothing otherwise default_h]
+end
+
+to gui_hover(b)
+    give back point_in_box(mouse_x(), mouse_y(), b)
+end
+
+to point_in_box(px, py, b)
+    give back px >= b[0] and px < b[0] + b[2] and py >= b[1] and py < b[1] + b[3]
+end
+
+# the text drawn centred in a box
+to gui_centered_text(t, b, colour, size be nothing)
+    let s be size if size is not nothing otherwise gui_size
+    let tw be text_width(t, s)
+    let th be text_height(s)
+    draw_text(t, b[0] + (b[2] - tw) / 2, b[1] + (b[3] - th) / 2, s, colour)
+end
+
+# ------------------------------------------------------------------ layout
+# layout(x, y, width) starts a column of rows; row(height, columns) starts the next row
+# split into equal columns; cell() gives the next [x, y, w, h] (cell(2) spans two columns).
+to layout(x, y, width, gap be 8)
+    change gui_layout_x to x
+    change gui_layout_w to width
+    change gui_gap to gap
+    change gui_row_y to y
+    change gui_row_h to 0
+    change gui_row_cols to 1
+    change gui_row_col to 0
+end
+
+to row(height, columns be 1)
+    if gui_row_h > 0
+        change gui_row_y to gui_row_y + gui_row_h + gui_gap
+    end
+    change gui_row_h to height
+    change gui_row_cols to columns
+    change gui_row_col to 0
+end
+
+to cell(span be 1)
+    let cw be (gui_layout_w - gui_gap * (gui_row_cols - 1)) / gui_row_cols
+    let x be gui_layout_x + gui_row_col * (cw + gui_gap)
+    change gui_row_col to gui_row_col + span
+    give back [x, gui_row_y, cw * span + gui_gap * (span - 1), gui_row_h]
+end
+
+# skip some space before the next row
+to space(pixels)
+    change gui_row_y to gui_row_y + pixels
+end
+
+# ------------------------------------------------------------------ widgets
+# a clickable button: yes on the frame it's clicked
+to button(label, x, y be nothing, w be nothing, h be nothing)
+    gui_tick()
+    let b be gui_box(x, y, w, h, text_width(gui_shown(label), gui_size) + 24, gui_size + 16)
+    let hot be gui_hover(b)
+    if hot and mouse_pressed()
+        change gui_active to label
+    end
+    let held be gui_active is label and mouse_down()
+    let fill be gui_color("widget")
+    if held and hot
+        change fill to gui_color("press")
+    otherwise if hot
+        change fill to gui_color("hover")
+    end
+    round_rect(b[0], b[1], b[2], b[3], 6, fill)
+    line_width(1)
+    outline_round_rect(b[0], b[1], b[2], b[3], 6, gui_color("border"))
+    gui_centered_text(gui_shown(label), b, gui_color("text"))
+    give back hot and mouse_released() and gui_active is label
+end
+
+# a button drawn in the accent colour (for the main action)
+to accent_button(label, x, y be nothing, w be nothing, h be nothing)
+    gui_tick()
+    let b be gui_box(x, y, w, h, text_width(gui_shown(label), gui_size) + 24, gui_size + 16)
+    let hot be gui_hover(b)
+    if hot and mouse_pressed()
+        change gui_active to label
+    end
+    let fill be gui_color("accent")
+    if gui_active is label and hot
+        change fill to mix_color(gui_color("accent"), "black", 0.25)
+    otherwise if hot
+        change fill to mix_color(gui_color("accent"), "white", 0.15)
+    end
+    round_rect(b[0], b[1], b[2], b[3], 6, fill)
+    gui_centered_text(gui_shown(label), b, "white")
+    give back hot and mouse_released() and gui_active is label
+end
+
+# text; size and colour are optional
+# (with a cell: label(text, cell(), [size], [colour]))
+to label(t, x, y be nothing, size be nothing, colour be nothing)
+    gui_tick()
+    if is_list(x)
+        change colour to size
+        change size to y
+    end
+    let s be size if size is not nothing otherwise gui_size
+    let c be colour if colour is not nothing otherwise gui_color("text")
+    if is_list(x)
+        draw_text(t, x[0], x[1] + (x[3] - text_height(s)) / 2, s, c)
+    otherwise
+        draw_text(t, x, y, s, c)
+    end
+end
+
+# a tick box: gives back the new value
+to checkbox(label, checked, x, y be nothing)
+    gui_tick()
+    let b be gui_box(x, y, nothing, nothing, gui_size + 10 + text_width(gui_shown(label), gui_size), gui_size + 8)
+    let box_size be gui_size + 4
+    let box_x be b[0]
+    let box_y be b[1] + (b[3] - box_size) / 2
+    let hot be gui_hover(b)
+    if hot and mouse_pressed()
+        change gui_active to label
+    end
+    if hot and mouse_released() and gui_active is label
+        change checked to not checked
+    end
+    round_rect(box_x, box_y, box_size, box_size, 4, gui_color("hover") if hot otherwise gui_color("widget"))
+    line_width(1)
+    outline_round_rect(box_x, box_y, box_size, box_size, 4, gui_color("border"))
+    if checked
+        round_rect(box_x + 3, box_y + 3, box_size - 6, box_size - 6, 3, gui_color("accent"))
+        line_width(2.5)
+        line(box_x + 5, box_y + box_size / 2, box_x + box_size / 2 - 1, box_y + box_size - 6, "white")
+        line(box_x + box_size / 2 - 1, box_y + box_size - 6, box_x + box_size - 5, box_y + 5, "white")
+        line_width(1)
+    end
+    draw_text(gui_shown(label), box_x + box_size + 8, b[1] + (b[3] - text_height(gui_size)) / 2, gui_size, gui_color("text"))
+    give back checked
+end
+
+# drag to pick a number between low and high: gives back the new value
+to slider(id, value, low, high, x, y be nothing, w be nothing, h be nothing)
+    gui_tick()
+    let b be gui_box(x, y, w, h, 200, gui_size + 8)
+    let hot be gui_hover(b)
+    if hot and mouse_pressed()
+        change gui_active to id
+    end
+    if gui_active is id and mouse_down()
+        let t be clamp((mouse_x() - b[0]) / b[2], 0, 1)
+        change value to low + (high - low) * t
+        if is_number(low) and is_number(high) and floor(low) is low and floor(high) is high and high - low >= 10
+            change value to round(value)
+        end
+    end
+    let t be 0
+    if high is not low
+        change t to clamp((value - low) / (high - low), 0, 1)
+    end
+    let cy be b[1] + b[3] / 2
+    round_rect(b[0], cy - 3, b[2], 6, 3, gui_color("widget"))
+    round_rect(b[0], cy - 3, b[2] * t, 6, 3, gui_color("accent"))
+    let knob be b[3] / 2 - 1
+    circle(b[0] + b[2] * t, cy, knob, gui_color("text") if hot or gui_active is id otherwise gui_color("dim"))
+    give back value
+end
+
+# a one-line text box: click it, type, Enter finishes. Gives back the new text.
+# (with a cell: text_field(id, text, cell(), [hint]))
+to text_field(id, value, x, y be nothing, w be nothing, h be nothing, hint be "")
+    gui_tick()
+    if is_list(x) and is_text(y)
+        change hint to y
+    end
+    let b be gui_box(x, y, w, h, 220, gui_size + 14)
+    let hot be gui_hover(b)
+    if hot and mouse_pressed()
+        change gui_focus to id
+        change gui_press_claimed to yes
+        show_keyboard(yes)
+    end
+    let focused be gui_focus is id
+    if focused
+        let typed be text_input()
+        if length(typed) > 0
+            change value to value + typed
+        end
+        if key_repeated("backspace") and length(value) > 0
+            change value to value[0:length(value) - 1]
+        end
+        if key_pressed("enter")
+            change gui_submitted_id to id
+        end
+        if key_pressed("escape")
+            change gui_focus to nothing
+            show_keyboard(no)
+        end
+    end
+    round_rect(b[0], b[1], b[2], b[3], 5, gui_color("field"))
+    line_width(2 if focused otherwise 1)
+    outline_round_rect(b[0], b[1], b[2], b[3], 5, gui_color("accent") if focused otherwise gui_color("border"))
+    line_width(1)
+    let ty be b[1] + (b[3] - text_height(gui_size)) / 2
+    clip(b[0] + 4, b[1], b[2] - 8, b[3])
+    let shown be value
+    let tw be text_width(shown, gui_size)
+    let tx be b[0] + 8
+    if tw > b[2] - 20
+        change tx to b[0] + b[2] - 12 - tw
+    end
+    if length(value) is 0 and not focused
+        draw_text(hint, tx, ty, gui_size, gui_color("dim"))
+    otherwise
+        draw_text(shown, tx, ty, gui_size, gui_color("text"))
+    end
+    if focused and floor(game_time() * 2) % 2 is 0
+        rect(tx + tw + 1, ty - 1, 2, text_height(gui_size) + 2, gui_color("accent"))
+    end
+    no_clip()
+    give back value
+end
+
+# was Enter pressed in this text field this frame?
+to submitted(id)
+    give back gui_submitted_id is id
+end
+
+to focus(id)
+    change gui_focus to id
+end
+
+# a scrolling list: click an item to pick it. Gives back the picked index (or nothing).
+to list_box(id, items, selected, x, y be nothing, w be nothing, h be nothing)
+    gui_tick()
+    let b be gui_box(x, y, w, h, 220, 200)
+    let item_h be gui_size + 14
+    let hot be gui_hover(b)
+    let scroll be get(gui_scroll, id, 0)
+    let most be max(0, length(items) * item_h - b[3])
+    if hot
+        change scroll to clamp(scroll - mouse_wheel() * 24, 0, most)
+    end
+    change scroll to clamp(scroll, 0, most)
+    change gui_scroll at id to scroll
+    round_rect(b[0], b[1], b[2], b[3], 6, gui_color("field"))
+    clip(b[0] + 1, b[1] + 1, b[2] - 2, b[3] - 2)
+    for each i, item in items
+        let iy be b[1] + i * item_h - scroll
+        if iy + item_h < b[1] or iy > b[1] + b[3]
+            skip
+        end
+        let ib be [b[0], iy, b[2], item_h]
+        let over be hot and point_in_box(mouse_x(), mouse_y(), ib)
+        if i is selected
+            rect(ib[0], ib[1], ib[2], ib[3], gui_color("select"))
+        otherwise if over
+            rect(ib[0], ib[1], ib[2], ib[3], gui_color("widget"))
+        end
+        if over and mouse_pressed()
+            change selected to i
+        end
+        draw_text(text(item), ib[0] + 10, iy + (item_h - text_height(gui_size)) / 2, gui_size, gui_color("text"))
+    end
+    no_clip()
+    line_width(1)
+    outline_round_rect(b[0], b[1], b[2], b[3], 6, gui_color("border"))
+    give back selected
+end
+
+# a bar that fills from 0 to 1
+to progress_bar(value, x, y be nothing, w be nothing, h be nothing)
+    gui_tick()
+    let b be gui_box(x, y, w, h, 200, 14)
+    round_rect(b[0], b[1], b[2], b[3], b[3] / 2, gui_color("widget"))
+    let t be clamp(value, 0, 1)
+    if t > 0
+        round_rect(b[0], b[1], max(b[3], b[2] * t), b[3], b[3] / 2, gui_color("accent"))
+    end
+end
+
+# a window-like panel with a title bar; gives back the area inside it as [x, y, w, h]
+to panel(title, x, y be nothing, w be nothing, h be nothing)
+    gui_tick()
+    let b be gui_box(x, y, w, h, 300, 200)
+    let bar be gui_size + 16
+    round_rect(b[0] + 2, b[1] + 3, b[2], b[3], 10, "#00000040")
+    round_rect(b[0], b[1], b[2], b[3], 10, gui_color("panel"))
+    round_rect(b[0], b[1], b[2], bar, 10, gui_color("title"))
+    rect(b[0], b[1] + bar - 10, b[2], 10, gui_color("title"))
+    line_width(1)
+    outline_round_rect(b[0], b[1], b[2], b[3], 10, gui_color("border"))
+    draw_text(title, b[0] + 14, b[1] + (bar - text_height(gui_size)) / 2, gui_size, gui_color("text"))
+    give back [b[0] + 12, b[1] + bar + 12, b[2] - 24, b[3] - bar - 24]
+end
+
+# a thin dividing line across a width
+to separator(x, y be nothing, w be nothing)
+    gui_tick()
+    if is_list(x)
+        line(x[0], x[1] + x[3] / 2, x[0] + x[2], x[1] + x[3] / 2, gui_color("border"))
+    otherwise
+        line(x, y, x + w, y, gui_color("border"))
+    end
+end
+
+# clear the screen to the theme's background
+to gui_background()
+    clear(gui_color("bg"))
+end

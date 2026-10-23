@@ -1,0 +1,48 @@
+# Sets: each value at most once.
+let s be set([3, 1, 3, 2])
+say s
+say length(s)
+say type_of(s)
+add 5 to s
+add 1 to s
+say s
+say 5 is in s
+say 9 is not in s
+remove 3 from s
+say s
+for each x in s
+    say "item {x}"
+end
+let a be set(["x", "y", "z"])
+let b be set(["y", "z", "w"])
+say union(a, b)
+say intersection(a, b)
+say difference(a, b)
+say is_subset(set(["y"]), a)
+say set([1, 2]) is set([2, 1])
+say set() is set([])
+say set("hello")
+say sort(list(set([5, 3, 5, 1])))
+say is_set(s)
+say contains(s, 2)
+let empty be set()
+if not empty
+    say "an empty set is like no"
+end
+attempt
+    remove 42 from s
+rescue problem
+    say problem
+end
+attempt
+    add [1] to s
+rescue problem
+    say problem
+end
+# remove also works on lists and maps
+let xs be [1, 2, 3, 2]
+remove 2 from xs
+say xs
+let m be {"a": 1, "b": 2}
+remove "a" from m
+say m

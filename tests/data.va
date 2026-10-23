@@ -1,0 +1,219 @@
+# Vanta 6.0 data builtins: hashes, ids, encodings, compression, number math, statistics, CSV.
+
+# ---- hashes ----
+say md5("")
+say md5("hello world")
+say sha1("abc")
+say sha1("")
+say sha256("abc")
+say sha256("héllo ✓")
+say sha256("The quick brown fox jumps over the lazy dog, again and again, so the message is longer than one block.")
+say md5(bytes([0, 1, 2, 255]))
+say sha1(bytes([104, 105]))
+say sha256(42)
+assert(md5("abc") == "900150983cd24fb0d6963f7d28e17f72", "md5 abc")
+assert(sha1("abc") == "a9993e364706816aba3e25717850c26c9cd0d89d", "sha1 abc")
+assert(sha256("") == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "sha256 empty")
+assert(sha1(bytes([104, 105])) == sha1("hi"), "bytes hash like text")
+
+say hmac("key", "The quick brown fox jumps over the lazy dog")
+say hmac("key", "The quick brown fox jumps over the lazy dog", "sha1")
+say hmac("key", "The quick brown fox jumps over the lazy dog", "MD5")
+say hmac("a much longer key that goes past the sixty-four byte block size of these hashes", "msg")
+assert(hmac("key", "The quick brown fox jumps over the lazy dog") == "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8", "hmac sha256")
+attempt
+    hmac("k", "m", "sha512")
+rescue e
+    say e
+end
+
+# ---- uuid ----
+let id be uuid()
+say length(id)
+say id[14]
+say id[8] + id[13] + id[18] + id[23]
+assert(length(id) == 36, "uuid length")
+assert(id[14] == "4", "uuid version 4")
+assert(uuid() != id, "uuids differ")
+
+# ---- base64 / hex / url / html ----
+say base64_encode("hello, world")
+say base64_decode("aGVsbG8sIHdvcmxk")
+say base64_encode("héllo")
+say base64_decode(base64_encode("héllo ✓"))
+say base64_to_bytes("AAEC/w==")
+say bytes_to_base64([0, 1, 2, 255])
+assert(base64_decode(base64_encode("round trip!")) == "round trip!", "base64 round trip")
+attempt
+    base64_decode("abc")
+rescue e
+    say e
+end
+attempt
+    base64_decode("a")
+rescue e
+    say e
+end
+say hex_encode("hi ✓")
+say hex_decode("6869 e29c93")
+assert(hex_decode(hex_encode("round trip")) == "round trip", "hex round trip")
+attempt
+    hex_decode("abc")
+rescue e
+    say e
+end
+attempt
+    hex_decode("zz")
+rescue e
+    say e
+end
+say url_encode("a b&c=d/é~_.-!")
+say url_decode("a%20b%26c%3Dd%2F%C3%A9")
+say url_decode("100% sure %zz %4")
+say url_decode("%E2%82")
+assert(url_decode(url_encode("x = 1 & y = ünïcode")) == "x = 1 & y = ünïcode", "url round trip")
+say html_escape("<a href=\"x\">Tom & Jerry's</a>")
+say bytes_to_text(bytes([104, 105, 32, 226, 156, 147]))
+say bytes_to_text(bytes([104, 255, 105]))
+
+# ---- compression ----
+let text be "Vanta Vanta Vanta Vanta Vanta Vanta Vanta Vanta Vanta Vanta Vanta Vanta"
+let packed be compress(text)
+say type_of(packed)
+assert(type_of(packed) == "bytes", "compress gives bytes")
+assert(length(packed) < length(text), "compress shrinks repetitive text")
+say bytes_to_text(decompress(packed))
+assert(bytes_to_text(decompress(packed)) == text, "compress round trip")
+let gz be gzip(text)
+say type_of(gz)
+say gz[0]
+say gz[1]
+say gz[9]
+assert(bytes_to_text(gunzip(gz)) == text, "gzip round trip")
+assert(bytes_to_text(gunzip(gzip("é✓"))) == "é✓", "gzip unicode round trip")
+say length(decompress(compress(bytes([]))))
+say length(gunzip(bytes([])))
+attempt
+    decompress("not compressed")
+rescue e
+    say e
+end
+attempt
+    gunzip("not gzip")
+rescue e
+    say e
+end
+
+# ---- whole-number math ----
+say gcd(12, 18)
+say gcd([48, 36, 120])
+say gcd(-4, 6)
+say lcm(4, 6)
+say lcm([2, 3, 4, 5])
+say lcm(0, 5)
+say factorial(10)
+say factorial(0)
+say isqrt(99)
+say isqrt(100)
+say isqrt(0)
+assert(factorial(10) == 3628800, "factorial 10")
+assert(gcd(12, 18) == 6, "gcd")
+attempt
+    factorial(-1)
+rescue e
+    say e
+end
+attempt
+    gcd(1.5, 3)
+rescue e
+    say e
+end
+attempt
+    gcd([])
+rescue e
+    say e
+end
+
+# ---- statistics ----
+say mean([1, 2, 3, 4])
+say mean([2, 4, 6])
+say mean([0.1, 0.2, 0.3])
+say median([3, 1, 2])
+say median([3, 1, 2, 4])
+say median([1, 3])
+say median([2.5, 1, 7])
+say variance([2, 4, 4, 4, 5, 5, 7, 9])
+say stdev([2, 4, 4, 4, 5, 5, 7, 9])
+say variance([1.5, 2.5, 3.5])
+say stdev([1, 2, 3, 4])
+say mode([1, 2, 2, 3, 3, 3])
+say mode(["a", "b", "a"])
+assert(mean([2, 4, 6]) == 4, "mean")
+assert(median([5, 1, 3]) == 3, "median odd")
+attempt
+    variance([1])
+rescue e
+    say e
+end
+attempt
+    mean([])
+rescue e
+    say e
+end
+attempt
+    mean([1, "x"])
+rescue e
+    say e
+end
+attempt
+    mode([])
+rescue e
+    say e
+end
+
+# ---- CSV ----
+let rows be csv_parse("name,age,quote\nAda,36,\"said \"\"hi\"\", then left\"\nBob,41,\"line one\nline two\"\n")
+say rows
+say length(rows)
+say rows[1][2]
+say rows[2][2]
+say csv_parse("a;b;c\r\n1;2;3", ";")
+say csv_parse("x,,y\n\n,\n")
+say csv_parse("\"\"\n")
+let out be csv_format([["a", "b,c", "d\"e"], [1, 2.5, yes], ["multi\nline", nothing, ""]])
+say out
+assert(csv_parse(out) == [["a", "b,c", "d\"e"], ["1", "2.5", "yes"], ["multi\nline", "nothing", ""]], "csv round trip")
+say csv_format([["a;b", "c"], ["d", "e"]], ";")
+attempt
+    csv_parse("a", "::")
+rescue e
+    say e
+end
+attempt
+    csv_format("nope")
+rescue e
+    say e
+end
+
+let path be env("TMPDIR", "/tmp") + "/vanta_csv_test.csv"
+csv_write(path, [["id", "name"], [1, "Ada"], [2, "Bob, Jr."]])
+say read_file(path)
+say csv_read(path)
+csv_write(path, [["p", "q"], ["1", "2"]], "\t")
+say csv_read(path, "\t")
+csv_write_maps(path, [{"name": "Ada", "lang": "Vanta"}, {"name": "Bob", "lang": "C, mostly"}])
+say read_file(path)
+let people be csv_read_maps(path)
+say people
+assert(people[1]["lang"] == "C, mostly", "csv maps round trip")
+csv_write_maps(path, [{"name": "Ada", "lang": "Vanta"}, {"name": "Bob"}], ["lang", "name"])
+say csv_read_maps(path)
+remove_path(path)
+assert(not path_exists(path), "temp csv removed")
+attempt
+    csv_read(path)
+rescue e
+    say contains(e, "could not read")
+end
+
+say "data: all good"

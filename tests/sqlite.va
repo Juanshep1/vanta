@@ -1,0 +1,101 @@
+# Vanta 6.0 SQLite: db_open, db_execute, db_query, db_last_id, close.
+
+let db be db_open(":memory:")
+say type_of(db)
+say db
+
+# a script (no parameters): runs every statement, gives back how many rows changed
+let changed be db_execute(db, "create table people (id integer primary key, name text not null unique, age integer, score real, photo blob, note text); insert into people (name, age, score) values ('Ada', 36, 9.5); insert into people (name, age, score) values ('Bob', 41, 7.25);")
+say changed
+assert(changed == 2, "script inserts two rows")
+say db_last_id(db)
+
+# one statement with ? parameters (a list)
+say db_execute(db, "insert into people (name, age, score, photo, note) values (?, ?, ?, ?, ?)", ["Cy", 29, 8, bytes([0, 1, 254, 255]), nothing])
+say db_last_id(db)
+assert(db_last_id(db) == 3, "last id after list insert")
+
+# one statement with :name parameters (a map), yes/no become 1/0
+say db_execute(db, "insert into people (name, age, score, note) values (:name, :age, :score, :note)", {"name": "Dee", "age": yes, "score": 6.5, "note": "héllo ✓"})
+say db_last_id(db)
+
+let rows be db_query(db, "select id, name, age, score, photo, note from people order by id")
+say length(rows)
+for each row in rows
+    say row
+end
+say type_of(rows[2]["photo"])
+say rows[2]["photo"][3]
+assert(rows[2]["photo"] == bytes([0, 1, 254, 255]), "blob round trip")
+assert(rows[0]["photo"] == nothing, "null is nothing")
+assert(rows[3]["age"] == 1, "yes stored as 1")
+assert(rows[1]["score"] == 7.25, "real comes back as a decimal")
+
+say db_query(db, "select name from people where age > ? order by name", [30])
+say db_query(db, "select count(*) as n, sum(age) as total, avg(score) as mean from people")
+say db_query(db, "select name from people where name = :who", {"who": "Cy"})
+say db_query(db, "select * from people where id = ?", [999])
+say db_query(db, "update people set age = age + 1 where age > 30")
+say db_query(db, "select name, age from people where age > 30 order by id")
+
+# change counts
+say db_execute(db, "update people set note = 'x' where age > ?", [20])
+say db_execute(db, "delete from people where id = ?", [4])
+say db_execute(db, "delete from people where id = 4")
+say db_execute(db, "create table empty_one (x)")
+say db_query(db, "select count(*) as n from people")
+
+# errors are catchable and say what SQLite said
+attempt
+    db_query(db, "select * from no_such_table")
+rescue e
+    say e
+end
+attempt
+    db_execute(db, "insert into people (name) values (?)", ["Ada"])
+rescue e
+    say e
+end
+attempt
+    db_query(db, "selec 1")
+rescue e
+    say e
+end
+attempt
+    db_query(db, "select ?", [])
+rescue e
+    say e
+end
+attempt
+    db_query(db, "select :a", {"b": 1})
+rescue e
+    say e
+end
+attempt
+    db_query(db, "select 1; select 2")
+rescue e
+    say e
+end
+attempt
+    db_query(db, "select ?", "nope")
+rescue e
+    say e
+end
+attempt
+    db_query(db, "select ?", [[1, 2]])
+rescue e
+    say e
+end
+attempt
+    db_query("not a db", "select 1")
+rescue e
+    say e
+end
+
+close(db)
+attempt
+    db_query(db, "select 1")
+rescue e
+    say e
+end
+say "sqlite: all good"

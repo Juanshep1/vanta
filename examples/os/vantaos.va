@@ -1,0 +1,504 @@
+# VantaOS — a small operating system written entirely in Vanta.
+#
+# It boots to a colorful banner and a shell. Try: help, ls, cat readme.txt, write notes.txt hello,
+# calc (2 + 3) * 7, mem, uptime, color yellow, snake, tasks, gfx, reboot, halt.
+#
+# Build and run it in QEMU:
+#   python3 native/vantac.py examples/os/vantaos.va --kernel -o out/vantaos.elf
+#   qemu-system-x86_64 -kernel out/vantaos.elf
+# Or make a bootable CD/USB image:
+#   python3 native/vantac.py examples/os/vantaos.va --kernel -o out/vantaos.elf --iso out/vantaos.iso
+
+fix VERSION be "1.0"
+let shell_color be "light gray"
+let running be yes
+
+# ------------------------------------------------------------------ the status bar (top row, redrawn every second)
+to two_digits(n)
+    give back pad_left(text(n), 2, "0")
+end
+
+to draw_status()
+    let up be uptime()
+    let clock_text be two_digits(floor(up / 3600)) + ":" + two_digits(floor(up / 60) % 60) + ":" + two_digits(up % 60)
+    let info be memory_info()
+    let free_mb be floor(info["free"] / 1048576)
+    let bar be " VantaOS {VERSION}  |  up {clock_text}  |  {clock()} UTC  |  {free_mb} MB free  |  {length(list_files())} files"
+    print_at(0, 0, pad_right(bar, screen_columns()), "white on blue")
+end
+
+# ------------------------------------------------------------------ the banner
+to banner()
+    clear_screen("black")
+    draw_status()
+    # big letters, 5 rows each: "#" becomes a solid block
+    let font be {}
+    change font at "V" to ["#   #", "#   #", "#   #", " # # ", "  #  "]
+    change font at "A" to [" ### ", "#   #", "#####", "#   #", "#   #"]
+    change font at "N" to ["#   #", "##  #", "# # #", "#  ##", "#   #"]
+    change font at "T" to ["#####", "  #  ", "  #  ", "  #  ", "  #  "]
+    change font at "O" to [" ### ", "#   #", "#   #", "#   #", " ### "]
+    change font at "S" to [" ####", "#    ", " ### ", "    #", "#### "]
+    change font at " " to ["  ", "  ", "  ", "  ", "  "]
+    let colors be ["light red", "yellow", "light green", "light cyan", "light magenta", "white", "light blue", "pink"]
+    let x be 16
+    for each i, letter in "VANTA OS"
+        for each row, pattern in font[letter]
+            print_at(x, 2 + row, replace(pattern, "#", "█"), colors[i])
+        end
+        change x to x + length(font[letter][0]) + 1
+    end
+    print_at(20, 8, "a tiny operating system written in Vanta", "white")
+    print_at(16, 9, repeat_text("─", 48), "dark gray")
+    set_cursor(0, 11)
+    set_color("light green")
+    let total_mb be floor(memory_info()["total"] / 1048576)
+    let cpu be system_info()["cpu"]
+    say "  Booted in {ticks()} ms.  Memory: {total_mb} MB.  CPU: {cpu}"
+    set_color("light gray")
+    say "  Type 'help' to see what I can do."
+    say ""
+end
+
+# ------------------------------------------------------------------ dates: turn seconds since 1970 into a calendar date
+to date_text(stamp)
+    let z be floor(stamp / 86400) + 719468
+    let era be floor(z / 146097)
+    let doe be z - era * 146097
+    let yoe be floor((doe - floor(doe / 1460) + floor(doe / 36524) - floor(doe / 146096)) / 365)
+    let doy be doe - (365 * yoe + floor(yoe / 4) - floor(yoe / 100))
+    let mp be floor((5 * doy + 2) / 153)
+    let day be doy - floor((153 * mp + 2) / 5) + 1
+    let month be mp + 3 if mp < 10 otherwise mp - 9
+    let year be yoe + era * 400 + (1 if month <= 2 otherwise 0)
+    let names be ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+    let weekdays be ["Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"]
+    give back weekdays[floor(stamp / 86400) % 7] + " " + text(day) + " " + names[month - 1] + " " + text(year)
+end
+
+# ------------------------------------------------------------------ calc: a little arithmetic evaluator
+type Calc
+    has tokens
+    has pos
+    to setup(source)
+        change me.tokens to tokenize(source)
+        change me.pos to 0
+    end
+    to peek()
+        if me.pos < length(me.tokens)
+            give back me.tokens[me.pos]
+        end
+        give back ""
+    end
+    to next()
+        let t be me.peek()
+        change me.pos to me.pos + 1
+        give back t
+    end
+    # terms joined by + and -
+    to expression()
+        let value be me.term()
+        while me.peek() is "+" or me.peek() is "-"
+            if me.next() is "+"
+                change value to value + me.term()
+            otherwise
+                change value to value - me.term()
+            end
+        end
+        give back value
+    end
+    # factors joined by *, / and %
+    to term()
+        let value be me.power()
+        while me.peek() is "*" or me.peek() is "/" or me.peek() is "%"
+            let op be me.next()
+            let right be me.power()
+            if op is "*"
+                change value to value * right
+            otherwise if op is "/"
+                change value to value / right
+            otherwise
+                change value to value % right
+            end
+        end
+        give back value
+    end
+    # a ^ b (right to left)
+    to power()
+        let base be me.unary()
+        if me.peek() is "^"
+            me.next()
+            give back base ^ me.power()
+        end
+        give back base
+    end
+    to unary()
+        if me.peek() is "-"
+            me.next()
+            give back 0 - me.unary()
+        end
+        if me.peek() is "("
+            me.next()
+            let value be me.expression()
+            if me.next() is not ")"
+                fail("a ')' is missing")
+            end
+            give back value
+        end
+        let t be me.next()
+        if t is ""
+            fail("the expression ended too early")
+        end
+        give back number(t)
+    end
+end
+
+to tokenize(source)
+    let tokens be []
+    let current be ""
+    for each ch in source
+        if contains("0123456789.", ch)
+            change current to current + ch
+        otherwise
+            if current is not ""
+                add current to tokens
+                change current to ""
+            end
+            if contains("+-*/%^()", ch)
+                add ch to tokens
+            otherwise if ch is not " "
+                fail("I don't know what '{ch}' means in a calculation")
+            end
+        end
+    end
+    if current is not ""
+        add current to tokens
+    end
+    give back tokens
+end
+
+to calculate(source)
+    let c be new Calc(source)
+    let value be c.expression()
+    if c.peek() is not ""
+        fail("I didn't expect '{c.peek()}' there")
+    end
+    give back value
+end
+
+# ------------------------------------------------------------------ snake (text mode, keyboard + timer)
+to snake()
+    let w be screen_columns()
+    let h be screen_rows()
+    clear_screen("black")
+    hide_cursor()
+    draw_status()
+    print_at(0, 1, "╔" + repeat_text("═", w - 2) + "╗", "light cyan")
+    for each y in range(2, h - 1)
+        print_at(0, y, "║", "light cyan")
+        print_at(w - 1, y, "║", "light cyan")
+    end
+    print_at(0, h - 1, "╚" + repeat_text("═", w - 2) + "╝", "light cyan")
+    print_at(3, 1, " SNAKE  arrows/WASD to steer, Q to quit ", "yellow on black")
+    let body be [[40, 12], [39, 12], [38, 12]]
+    let dx be 1
+    let dy be 0
+    let score be 0
+    let food be [random(2, w - 3), random(3, h - 3)]
+    print_at(food[0], food[1], "♥", "light red")
+    for each part in body
+        print_at(part[0], part[1], "█", "light green")
+    end
+    let playing be yes
+    while playing
+        let key be poll_key()
+        while key is not ""
+            if (key is "up" or key is "w") and dy is 0
+                change dx, dy to 0, -1
+            otherwise if (key is "down" or key is "s") and dy is 0
+                change dx, dy to 0, 1
+            otherwise if (key is "left" or key is "a") and dx is 0
+                change dx, dy to -1, 0
+            otherwise if (key is "right" or key is "d") and dx is 0
+                change dx, dy to 1, 0
+            otherwise if key is "q" or key is "escape"
+                change playing to no
+            end
+            change key to poll_key()
+        end
+        let head be [body[0][0] + dx, body[0][1] + dy]
+        if head[0] < 1 or head[0] > w - 2 or head[1] < 2 or head[1] > h - 2 or head is in body
+            change playing to no
+        end
+        if playing
+            change body to insert_at(body, 0, head)
+            if head == food
+                change score to score + 1
+                beep(1200, 20)
+                change food to [random(2, w - 3), random(3, h - 3)]
+                while food is in body
+                    change food to [random(2, w - 3), random(3, h - 3)]
+                end
+                print_at(food[0], food[1], "♥", "light red")
+            otherwise
+                let tail be pop(body)
+                print_at(tail[0], tail[1], " ")
+            end
+            print_at(head[0], head[1], "█", "light green")
+            print_at(w - 16, 1, " Score: {pad_left(text(score), 3)} ", "white on black")
+            sleep_ms(max(40, 110 - score * 4))
+        end
+    end
+    print_at(floor(w / 2) - 14, floor(h / 2), pad_right("   GAME OVER — score {score}", 28), "white on red")
+    print_at(floor(w / 2) - 14, floor(h / 2) + 1, pad_right("   press any key...", 28), "white on red")
+    sleep_ms(400)
+    clear_keys()
+    read_key()
+    show_cursor()
+    clear_screen("black")
+    draw_status()
+    say "You scored {score}."
+end
+
+# ------------------------------------------------------------------ tasks: cooperative multitasking on the timer
+type Task
+    has name
+    has step
+    has turns
+    has row
+end
+
+to tasks_demo()
+    clear_screen("black")
+    hide_cursor()
+    draw_status()
+    print_at(2, 2, "Three tasks share the CPU: every 25 ms the timer switches to the next one.", "yellow")
+    print_at(2, 3, "Each does a little work, then gives the CPU back (cooperative multitasking).", "yellow")
+    print_at(2, 20, "Press any key to stop.", "light gray")
+    let count be 0
+    let spin be 0
+    let ball be 0
+    let ball_dir be 1
+    to counter()
+        change count to count + 1
+        print_at(30, 6, text(count), "light green")
+    end
+    to spinner()
+        change spin to (spin + 1) % 4
+        print_at(30, 9, ["|", "/", "-", "\\"][spin], "light cyan")
+    end
+    to bouncer()
+        print_at(30 + ball, 12, " ")
+        change ball to ball + ball_dir
+        if ball <= 0 or ball >= 40
+            change ball_dir to 0 - ball_dir
+        end
+        print_at(30 + ball, 12, "■", "light magenta")
+    end
+    let tasks be [new Task("counter", counter, 0, 6), new Task("spinner", spinner, 0, 9), new Task("bouncer", bouncer, 0, 12)]
+    for each t in tasks
+        print_at(4, t.row, "Task {t.name}:", "white")
+    end
+    let current be 0
+    to switch_task()
+        let t be tasks[current]
+        t.step()
+        change t.turns to t.turns + 1
+        print_at(4, t.row + 1, "  turns: {t.turns}   ", "dark gray")
+        print_at(4, 16, "running now: {pad_right(t.name, 10)}", "white")
+        change current to (current + 1) % length(tasks)
+    end
+    let timer be every(25, switch_task)
+    clear_keys()
+    read_key()                    # the CPU sleeps here; the timer keeps switching tasks
+    stop_timer(timer)
+    show_cursor()
+    clear_screen("black")
+    draw_status()
+    say "Tasks ran {tasks[0].turns + tasks[1].turns + tasks[2].turns} turns in total."
+end
+
+# ------------------------------------------------------------------ gfx: the framebuffer
+to gfx_demo()
+    if not graphics_mode(800, 600)
+        say "No graphics card I know (QEMU's standard VGA works)."
+        give back nothing
+    end
+    let w be screen_width()
+    let h be screen_height()
+    let y be 0
+    while y < h
+        fill_rect(0, y, w, 4, rgb(10, 20 + floor(y / 6), 60 + floor(y / 4)))
+        change y to y + 4
+    end
+    fill_circle(620, 150, 70, "yellow")
+    fill_rect(0, 430, w, 170, rgb(20, 90, 40))
+    for each i in range(0, 12)
+        draw_line(400, 600, i * 70, 430, rgb(40, 140, 60))
+    end
+    draw_text(60, 60, "VantaOS", "white", 6)
+    draw_text(64, 170, "graphics in Vanta, on bare metal", "light cyan", 2)
+    draw_rect(50, 50, 540, 160, "white")
+    draw_text(60, 560, "press any key to go back to the shell (it stays in graphics mode)", "white")
+    clear_keys()
+    read_key()
+    clear_screen("black")
+    draw_status()
+    say "The console now runs on the framebuffer ({screen_columns()} x {screen_rows()} characters)."
+end
+
+# ------------------------------------------------------------------ the shell
+let commands be []
+add ["help", "show this list"] to commands
+add ["clear", "clear the screen"] to commands
+add ["echo TEXT", "print TEXT"] to commands
+add ["ls", "list the files"] to commands
+add ["cat FILE", "show a file"] to commands
+add ["write FILE TEXT", "save TEXT in FILE (replaces it)"] to commands
+add ["append FILE TEXT", "add a line to FILE"] to commands
+add ["rm FILE", "delete a file"] to commands
+add ["mem", "memory use"] to commands
+add ["uptime", "time since boot"] to commands
+add ["date", "the date and time (UTC)"] to commands
+add ["calc EXPR", "work out arithmetic, e.g. calc (2 + 3) * 7"] to commands
+add ["color NAME", "change the text color (e.g. color yellow)"] to commands
+add ["sysinfo", "about this computer"] to commands
+add ["snake", "play snake"] to commands
+add ["tasks", "watch three tasks share the CPU"] to commands
+add ["gfx", "switch to graphics and draw"] to commands
+add ["beep", "make a sound"] to commands
+add ["reboot", "restart the computer"] to commands
+add ["halt", "stop the computer"] to commands
+
+to show_help()
+    set_color("yellow")
+    say "Commands:"
+    set_color("light cyan")
+    for each c in commands
+        say "  " + pad_right(c[0], 18) + c[1]
+        print_at(20, cursor_position()[1] - 1, c[1], "light gray")    # recolor the description on screen
+    end
+    set_color(shell_color)
+end
+
+to rest_of(words, start)
+    give back join(slice(words, start, length(words)), " ")
+end
+
+to kb(n)
+    give back format_number(floor(n / 1024), 0) + " KB"
+end
+
+to run_command(line)
+    let words be split(trim(line), " ")
+    let words be keep(make w give w is not "", words)
+    if length(words) is 0
+        give back nothing
+    end
+    let cmd be lowercase(words[0])
+    match cmd
+        when "help", "?"
+            show_help()
+        when "clear", "cls"
+            clear_screen("black")
+            draw_status()
+        when "echo"
+            say rest_of(words, 1)
+        when "ls", "dir"
+            let names be list_files()
+            if length(names) is 0
+                say "(no files yet — try: write notes.txt hello)"
+            end
+            for each n in names
+                say "  " + pad_right(n, 24) + pad_left(text(file_length(n)), 8) + " bytes"
+            end
+        when "cat"
+            if length(words) < 2
+                say "usage: cat FILE"
+            otherwise
+                say read_from_file(words[1])
+            end
+        when "write"
+            if length(words) < 2
+                say "usage: write FILE TEXT"
+            otherwise
+                write_to_file(words[1], rest_of(words, 2))
+                say "saved {words[1]}"
+            end
+        when "append"
+            if length(words) < 2
+                say "usage: append FILE TEXT"
+            otherwise
+                let before be read_from_file(words[1]) if file_exists(words[1]) otherwise ""
+                let sep be "\n" if before is not "" otherwise ""
+                write_to_file(words[1], before + sep + rest_of(words, 2))
+                say "added to {words[1]}"
+            end
+        when "rm", "del"
+            if length(words) < 2
+                say "usage: rm FILE"
+            otherwise
+                delete_file(words[1])
+                say "deleted {words[1]}"
+            end
+        when "mem"
+            let m be memory_info()
+            say "memory: " + kb(m["total"]) + " total, " + kb(m["used"]) + " used, " + kb(m["free"]) + " free"
+            say "heap:   " + kb(m["heap"]) + " reserved, " + kb(m["heap_used"]) + " in use, " + text(m["blocks"]) + " blocks"
+            say "pages:  " + text(m["pages"]) + " pages of " + text(m["page_size"]) + " bytes, " + text(m["free_pages"]) + " free"
+        when "uptime"
+            let up be uptime()
+            say "up {floor(up / 3600)}h {floor(up / 60) % 60}m {up % 60}s ({ticks()} ms)"
+        when "date", "time"
+            say date_text(now()) + ", " + clock() + " UTC"
+        when "calc"
+            say calculate(rest_of(words, 1))
+        when "color"
+            change shell_color to rest_of(words, 1)
+            set_color(shell_color)
+            say "color set to {shell_color}"
+        when "sysinfo"
+            let s be system_info()
+            say "VantaOS {VERSION} on " + s["arch"]
+            say "CPU:       " + s["cpu"]
+            say "Memory:    " + kb(s["memory"])
+            say "Screen:    " + s["screen"] + ", " + text(s["columns"]) + " x " + text(s["rows"])
+            say "Booted by: " + s["loader"]
+        when "snake"
+            snake()
+        when "tasks"
+            tasks_demo()
+        when "gfx"
+            gfx_demo()
+        when "beep"
+            beep(880, 150)
+        when "reboot"
+            reboot()
+        when "halt", "shutdown"
+            say "Goodbye!"
+            change running to no
+        otherwise
+            say "I don't know '{cmd}'. Type 'help' to see the commands."
+    end
+end
+
+# ------------------------------------------------------------------ boot
+write_to_file("readme.txt", "Welcome to VantaOS!\nEverything here, from the shell to the snake game, is written in Vanta.\nFiles live in memory: they disappear when the computer turns off.")
+write_to_file("todo.txt", "- write an OS in Vanta\n- play snake")
+keep_top_rows(1)
+banner()
+every(1000, draw_status)
+
+while running
+    set_color("light green")
+    ask "vanta>" into line
+    set_color(shell_color)
+    attempt
+        run_command(text(line))
+    rescue problem
+        set_color("light red")
+        say "Oops: {problem}"
+        set_color(shell_color)
+    end
+end
+halt()

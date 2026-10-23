@@ -58,7 +58,9 @@ def main():
 
     print("\nheadless harnesses")
     for harness in ["tools/chip8_headless.py", "tools/ide_headless.py",
-                    "tools/server_headless.py"]:
+                    "tools/server_headless.py", "tools/tools_test.py",
+                    "tools/kernel_headless.py", "tools/check_headless.py",
+                    "tools/canvas_headless.py"]:   # kernel_headless / canvas_headless skip themselves if qemu/lld / SDL2 are missing
         result = subprocess.run([sys.executable, os.path.join(HERE, harness)],
                                 capture_output=True, text=True)
         name = os.path.basename(harness)

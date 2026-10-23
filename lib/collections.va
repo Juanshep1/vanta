@@ -1,0 +1,307 @@
+# Standard library: collections.   import "collections"
+#
+# Stack     last in, first out        push(x)  pop()  peek()  size()  is_empty()  to_list()
+# Queue     first in, first out       push(x)  pop()  peek()  size()  is_empty()  to_list()
+# Deque     both ends                 push_front(x)  push_back(x)  pop_front()  pop_back()
+#                                     peek_front()  peek_back()  size()  is_empty()  to_list()
+# Heap      smallest first            push(x)  pop()  peek()  size()  is_empty()  to_list()
+#           (Heap() orders with <; Heap(fn) uses fn(a, b) -> yes when a comes first)
+# PriorityQueue  lowest priority first, ties in arrival order
+#                                     push(item, priority)  pop()  peek()  size()  is_empty()
+# count_items(list) -> {value: how many}      group_by(fn, list) -> {fn(value): [values]}
+#
+# Popping or peeking an empty collection is an error ("... is empty").
+
+type Stack
+    has items
+    to setup()
+        change me.items to []
+    end
+    to push(x)
+        add x to me.items
+    end
+    to pop()
+        if length(me.items) is 0
+            fail("the stack is empty")
+        end
+        give back pop(me.items)
+    end
+    to peek()
+        if length(me.items) is 0
+            fail("the stack is empty")
+        end
+        give back last(me.items)
+    end
+    to size()
+        give back length(me.items)
+    end
+    to is_empty()
+        give back length(me.items) is 0
+    end
+    to to_list()
+        give back reverse(me.items)
+    end
+    to show()
+        give back "Stack" + text(reverse(me.items))
+    end
+end
+
+# A queue keeps a moving head index, so pop() is quick; the used part is dropped now and then.
+type Queue
+    has items
+    has head
+    to setup()
+        change me.items to []
+        change me.head to 0
+    end
+    to push(x)
+        add x to me.items
+    end
+    to pop()
+        if me.head >= length(me.items)
+            fail("the queue is empty")
+        end
+        let x be me.items[me.head]
+        change me.head to me.head + 1
+        if me.head > 32 and me.head * 2 > length(me.items)
+            change me.items to me.items[me.head:]
+            change me.head to 0
+        end
+        give back x
+    end
+    to peek()
+        if me.head >= length(me.items)
+            fail("the queue is empty")
+        end
+        give back me.items[me.head]
+    end
+    to size()
+        give back length(me.items) - me.head
+    end
+    to is_empty()
+        give back me.head >= length(me.items)
+    end
+    to to_list()
+        give back me.items[me.head:]
+    end
+    to show()
+        give back "Queue" + text(me.items[me.head:])
+    end
+end
+
+# A deque is two stacks back to back: `fronts` holds the front half reversed.
+type Deque
+    has fronts
+    has backs
+    to setup()
+        change me.fronts to []
+        change me.backs to []
+    end
+    to push_front(x)
+        add x to me.fronts
+    end
+    to push_back(x)
+        add x to me.backs
+    end
+    to balance(into_front)
+        let all be me.to_list()
+        let half be floor(length(all) / 2)
+        if into_front
+            change half to floor((length(all) + 1) / 2)
+        end
+        change me.fronts to reverse(all[0:half])
+        change me.backs to all[half:]
+    end
+    to pop_front()
+        if length(me.fronts) is 0
+            if length(me.backs) is 0
+                fail("the deque is empty")
+            end
+            me.balance(yes)
+        end
+        give back pop(me.fronts)
+    end
+    to pop_back()
+        if length(me.backs) is 0
+            if length(me.fronts) is 0
+                fail("the deque is empty")
+            end
+            me.balance(no)
+        end
+        give back pop(me.backs)
+    end
+    to peek_front()
+        if length(me.fronts) > 0
+            give back last(me.fronts)
+        end
+        if length(me.backs) is 0
+            fail("the deque is empty")
+        end
+        give back me.backs[0]
+    end
+    to peek_back()
+        if length(me.backs) > 0
+            give back last(me.backs)
+        end
+        if length(me.fronts) is 0
+            fail("the deque is empty")
+        end
+        give back me.fronts[0]
+    end
+    to size()
+        give back length(me.fronts) + length(me.backs)
+    end
+    to is_empty()
+        give back me.size() is 0
+    end
+    to to_list()
+        give back reverse(me.fronts) + me.backs
+    end
+    to show()
+        give back "Deque" + text(me.to_list())
+    end
+end
+
+# A binary min-heap. With a function, before(a, b) says whether a should come out first.
+type Heap
+    has items
+    has before
+    to setup(before be nothing)
+        change me.items to []
+        change me.before to before
+    end
+    to first_of(a, b)
+        if me.before is nothing
+            give back a < b
+        end
+        give back me.before(a, b)
+    end
+    to push(x)
+        add x to me.items
+        let i be length(me.items) - 1
+        while i > 0
+            let parent be floor((i - 1) / 2)
+            if not me.first_of(me.items[i], me.items[parent])
+                stop
+            end
+            let tmp be me.items[i]
+            change me.items[i] to me.items[parent]
+            change me.items[parent] to tmp
+            change i to parent
+        end
+    end
+    to pop()
+        let n be length(me.items)
+        if n is 0
+            fail("the heap is empty")
+        end
+        let top be me.items[0]
+        let tail be pop(me.items)
+        if n > 1
+            change me.items[0] to tail
+            let i be 0
+            let size be n - 1
+            while yes
+                let l be 2 * i + 1
+                let r be l + 1
+                let best be i
+                if l < size and me.first_of(me.items[l], me.items[best])
+                    change best to l
+                end
+                if r < size and me.first_of(me.items[r], me.items[best])
+                    change best to r
+                end
+                if best is i
+                    stop
+                end
+                let tmp be me.items[i]
+                change me.items[i] to me.items[best]
+                change me.items[best] to tmp
+                change i to best
+            end
+        end
+        give back top
+    end
+    to peek()
+        if length(me.items) is 0
+            fail("the heap is empty")
+        end
+        give back me.items[0]
+    end
+    to size()
+        give back length(me.items)
+    end
+    to is_empty()
+        give back length(me.items) is 0
+    end
+    to to_list()
+        let copy be Heap(me.before)
+        change copy.items to me.items[0:]
+        let out be []
+        while not copy.is_empty()
+            add copy.pop() to out
+        end
+        give back out
+    end
+    to show()
+        give back "Heap" + text(me.to_list())
+    end
+end
+
+to _pq_before(a, b)
+    if a[0] is b[0]
+        give back a[1] < b[1]
+    end
+    give back a[0] < b[0]
+end
+
+type PriorityQueue
+    has heap
+    has counter
+    to setup()
+        change me.heap to Heap(_pq_before)
+        change me.counter to 0
+    end
+    to push(item, priority)
+        me.heap.push([priority, me.counter, item])
+        change me.counter to me.counter + 1
+    end
+    to pop()
+        if me.heap.is_empty()
+            fail("the priority queue is empty")
+        end
+        give back me.heap.pop()[2]
+    end
+    to peek()
+        if me.heap.is_empty()
+            fail("the priority queue is empty")
+        end
+        give back me.heap.peek()[2]
+    end
+    to size()
+        give back me.heap.size()
+    end
+    to is_empty()
+        give back me.heap.is_empty()
+    end
+end
+
+to count_items(items)
+    let counts be {}
+    for each x in items
+        change counts[x] to get(counts, x, 0) + 1
+    end
+    give back counts
+end
+
+to group_by(fn, items)
+    let groups be {}
+    for each x in items
+        let k be fn(x)
+        if not has_key(groups, k)
+            change groups[k] to []
+        end
+        add x to groups[k]
+    end
+    give back groups
+end

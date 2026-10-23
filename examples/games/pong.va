@@ -1,0 +1,141 @@
+# PONG - you against the computer.
+# W/S or the arrow keys move your paddle (or drag with the mouse / a finger).
+# First to 7 wins. Space serves and restarts.
+#
+#   vanta run examples/games/pong.va
+
+import "game"
+
+window(640, 400, "Pong")
+
+fix paddle_w be 12
+fix paddle_h be 70
+fix ball_size be 12
+fix win_score be 7
+
+let player_y be 165
+let cpu_y be 165
+let ball_x be 314
+let ball_y be 194
+let ball_vx be 0
+let ball_vy be 0
+let player_score be 0
+let cpu_score be 0
+let state be "serve"           # "serve", "play" or "over"
+let flash be 0
+
+to serve(direction)
+    change ball_x to 314
+    change ball_y to 194
+    change ball_vx to 300 * direction
+    change ball_vy to random_between(-160, 160)
+    change state to "play"
+end
+
+to update(dt)
+    # the player's paddle: keys, or follow the mouse while it's held
+    if key_down("w") or key_down("up")
+        change player_y to player_y - 420 * dt
+    end
+    if key_down("s") or key_down("down")
+        change player_y to player_y + 420 * dt
+    end
+    if mouse_down()
+        change player_y to mouse_y() - paddle_h / 2
+    end
+    change player_y to clamp(player_y, 0, 400 - paddle_h)
+
+    # the computer follows the ball, a little slower than it could
+    let target be ball_y - paddle_h / 2 + ball_size / 2
+    change cpu_y to approach(cpu_y, target, 290 * dt)
+    change cpu_y to clamp(cpu_y, 0, 400 - paddle_h)
+
+    change flash to max(0, flash - dt)
+
+    if state is not "play"
+        if key_pressed("space") or mouse_pressed()
+            if state is "over"
+                change player_score to 0
+                change cpu_score to 0
+            end
+            serve(1)
+        end
+        give back nothing
+    end
+
+    change ball_x to ball_x + ball_vx * dt
+    change ball_y to ball_y + ball_vy * dt
+
+    # top and bottom walls
+    if ball_y < 0
+        change ball_y to 0
+        change ball_vy to abs(ball_vy)
+        beep(300, 0.04)
+    end
+    if ball_y > 400 - ball_size
+        change ball_y to 400 - ball_size
+        change ball_vy to -abs(ball_vy)
+        beep(300, 0.04)
+    end
+
+    # paddles: the further from the middle you hit, the steeper it bounces
+    if ball_vx < 0 and overlap(ball_x, ball_y, ball_size, ball_size, 30, player_y, paddle_w, paddle_h)
+        change ball_vx to min(abs(ball_vx) * 1.06, 900)
+        change ball_vy to (ball_y + ball_size / 2 - player_y - paddle_h / 2) * 8
+        beep(660, 0.05)
+    end
+    if ball_vx > 0 and overlap(ball_x, ball_y, ball_size, ball_size, 598, cpu_y, paddle_w, paddle_h)
+        change ball_vx to -min(abs(ball_vx) * 1.06, 900)
+        change ball_vy to (ball_y + ball_size / 2 - cpu_y - paddle_h / 2) * 8
+        beep(520, 0.05)
+    end
+
+    # a point
+    if ball_x < -ball_size
+        increase cpu_score by 1
+        point_over(-1)
+    end
+    if ball_x > 640
+        increase player_score by 1
+        point_over(1)
+    end
+end
+
+to point_over(direction)
+    change flash to 0.3
+    beep(180, 0.25, "triangle")
+    if player_score >= win_score or cpu_score >= win_score
+        change state to "over"
+    otherwise
+        serve(direction)
+    end
+end
+
+to draw()
+    clear("#101018")
+    if flash > 0
+        clear(mix_color("#101018", "#3a2a5a", flash / 0.3))
+    end
+    # the net
+    for each y in range(0, 20)
+        rect(318, y * 20 + 4, 4, 12, "#ffffff30")
+    end
+    color("white")
+    text_align("center")
+    draw_text(text(player_score), 260, 24, 48)
+    draw_text(text(cpu_score), 380, 24, 48)
+    rect(30, player_y, paddle_w, paddle_h, "#7cf2ff")
+    rect(598, cpu_y, paddle_w, paddle_h, "#ff7ca8")
+    if state is "play"
+        rect(ball_x, ball_y, ball_size, ball_size, "white")
+    end
+    if state is "serve"
+        draw_text("press space to serve", 320, 300, 16, "#ffffffb0")
+    end
+    if state is "over"
+        let winner be "YOU WIN!" if player_score > cpu_score otherwise "COMPUTER WINS"
+        draw_text(winner, 320, 160, 32, "#ffe066")
+        draw_text("space to play again", 320, 210, 16, "#ffffffb0")
+    end
+    text_align("left")
+end

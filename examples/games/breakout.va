@@ -1,0 +1,170 @@
+# BREAKOUT - knock out every brick with the ball.
+# Move the paddle with the mouse (or a finger), or Left/Right. Space / click launches the ball.
+#
+#   vanta run examples/games/breakout.va
+
+import "game"
+
+window(480, 600, "Breakout")
+
+fix brick_w be 40
+fix brick_h be 18
+fix paddle_y be 550
+fix colours be ["#ff5c7a", "#ff9f43", "#ffd93d", "#6bcB77", "#4d96ff", "#9b72ff"]
+
+let paddle_x be 200
+let paddle_w be 80
+let ball be new Rect(232, 530, 10, 10)
+let vx be 0
+let vy be 0
+let stuck be yes            # the ball sits on the paddle until you launch it
+let bricks be []
+let score be 0
+let lives be 3
+let level be 1
+let fx be particles(600)
+let shake be 0
+
+to build_bricks()
+    change bricks to []
+    for each r in range(0, 6)
+        for each c in range(0, 11)
+            add [new Rect(10 + c * (brick_w + 2), 70 + r * (brick_h + 4), brick_w, brick_h), colours[r]] to bricks
+        end
+    end
+end
+
+to launch()
+    change stuck to no
+    change vx to random_between(-140, 140)
+    change vy to -(320 + level * 30)
+end
+
+to update(dt)
+    fx.update(dt)
+    change shake to max(0, shake - dt)
+
+    # paddle: the mouse when it moves, otherwise the keys
+    if key_down("left") or key_down("a")
+        change paddle_x to paddle_x - 480 * dt
+    otherwise if key_down("right") or key_down("d")
+        change paddle_x to paddle_x + 480 * dt
+    otherwise if mouse_x() > 0
+        change paddle_x to smooth_follow(paddle_x, mouse_x() - paddle_w / 2, 25, dt)
+    end
+    change paddle_x to clamp(paddle_x, 0, 480 - paddle_w)
+
+    if lives <= 0 or length(bricks) is 0
+        if key_pressed("space") or mouse_pressed()
+            if lives <= 0
+                change score to 0
+                change lives to 3
+                change level to 1
+            otherwise
+                increase level by 1
+            end
+            build_bricks()
+            change stuck to yes
+        end
+        give back nothing
+    end
+
+    if stuck
+        change ball.x to paddle_x + paddle_w / 2 - 5
+        change ball.y to paddle_y - 12
+        if key_pressed("space") or mouse_pressed()
+            launch()
+        end
+        give back nothing
+    end
+
+    change ball.x to ball.x + vx * dt
+    change ball.y to ball.y + vy * dt
+
+    # walls
+    if ball.x < 0
+        change ball.x to 0
+        change vx to abs(vx)
+    end
+    if ball.x > 470
+        change ball.x to 470
+        change vx to -abs(vx)
+    end
+    if ball.y < 40
+        change ball.y to 40
+        change vy to abs(vy)
+    end
+
+    # the paddle: where it hits decides the angle
+    if vy > 0 and overlap(ball.x, ball.y, 10, 10, paddle_x, paddle_y, paddle_w, 12)
+        let off be (ball.center_x() - paddle_x - paddle_w / 2) / (paddle_w / 2)
+        let speed be sqrt(vx * vx + vy * vy)
+        change vx to off * speed * 0.8
+        change vy to -sqrt(max(speed * speed - vx * vx, 100 * 100))
+        change ball.y to paddle_y - 10
+        beep(440, 0.04)
+    end
+
+    # bricks: bounce off the side that was hit
+    for each i, b in bricks
+        let side be hit_side(ball, b[0])
+        if side is not nothing
+            if side is "left" or side is "right"
+                change vx to -vx
+            otherwise
+                change vy to -vy
+            end
+            remove_at(bricks, i)
+            increase score by 10
+            change shake to 0.08
+            fx.burst(b[0].center_x(), b[0].center_y(), 14, b[1], 150, 0.6)
+            beep(600 + length(bricks) * 8, 0.05, "square", 0.3)
+            stop
+        end
+    end
+
+    # missed the ball
+    if ball.y > 600
+        decrease lives by 1
+        change stuck to yes
+        beep(120, 0.3, "saw", 0.3)
+    end
+end
+
+to draw()
+    clear("#0e0f1a")
+    let sx be random_between(-3, 3) if shake > 0 otherwise 0
+    camera(sx, 0)
+    for each b in bricks
+        let r be b[0]
+        round_rect(r.x, r.y, r.w, r.h, 4, b[1])
+        rect(r.x + 3, r.y + 2, r.w - 6, 3, "#ffffff40")
+    end
+    round_rect(paddle_x, paddle_y, paddle_w, 12, 6, "#e9e9ff")
+    if lives > 0
+        circle(ball.center_x(), ball.center_y(), 5, "white")
+    end
+    fx.draw()
+    no_camera()
+    rect(0, 0, 480, 36, "#1a1c2e")
+    font("sans")
+    draw_text("SCORE  {score}", 12, 9, 18, "white")
+    draw_text("LEVEL {level}", 200, 9, 18, "#9b9bd0")
+    for each i in range(0, lives)
+        circle(460 - i * 18, 18, 6, "#ff5c7a")
+    end
+    text_align("center")
+    if lives <= 0
+        draw_text("GAME OVER", 240, 300, 40, "#ff5c7a")
+        draw_text("click or press space to try again", 240, 350, 18, "#c0c0e0")
+    otherwise if length(bricks) is 0
+        draw_text("LEVEL CLEAR!", 240, 300, 40, "#ffd93d")
+        draw_text("click or press space for the next level", 240, 350, 18, "#c0c0e0")
+    otherwise if stuck
+        draw_text("click or press space to launch", 240, 400, 18, "#c0c0e0")
+    end
+    text_align("left")
+    font(nothing)
+end
+
+build_bricks()

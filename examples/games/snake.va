@@ -1,0 +1,128 @@
+# SNAKE - eat the food, grow longer, don't bite yourself or hit the walls.
+# Arrow keys or WASD steer. Space restarts after a game over.
+#
+# This program uses the same names as the Vanta Studio IDE's canvas (canvas, clear,
+# color, rect, circle, text_at, key_down, on_frame), so it runs there too.
+#
+#   vanta run examples/games/snake.va
+
+canvas(480, 360)
+
+fix cell be 20
+fix cols be 24
+fix rows be 18
+
+let snake be [[12, 9], [11, 9], [10, 9]]
+let dx be 1
+let dy be 0
+let next_dx be 1
+let next_dy be 0
+let food be [18, 9]
+let score be 0
+let best be 0
+let game_over be no
+let tick be 0
+let speed be 8                 # frames per step: smaller is faster
+
+to place_food()
+    let spot be [random(0, cols - 1), random(0, rows - 1)]
+    while contains(snake, spot)
+        change spot to [random(0, cols - 1), random(0, rows - 1)]
+    end
+    change food to spot
+end
+
+to reset_game()
+    change snake to [[12, 9], [11, 9], [10, 9]]
+    change dx to 1
+    change dy to 0
+    change next_dx to 1
+    change next_dy to 0
+    change score to 0
+    change speed to 8
+    change game_over to no
+    place_food()
+end
+
+# remember the newest direction; it's used on the next step (no turning back on yourself)
+to steer()
+    if (key_down("left") or key_down("a")) and dx is not 1
+        change next_dx to -1
+        change next_dy to 0
+    otherwise if (key_down("right") or key_down("d")) and dx is not -1
+        change next_dx to 1
+        change next_dy to 0
+    otherwise if (key_down("up") or key_down("w")) and dy is not 1
+        change next_dx to 0
+        change next_dy to -1
+    otherwise if (key_down("down") or key_down("s")) and dy is not -1
+        change next_dx to 0
+        change next_dy to 1
+    end
+end
+
+to move()
+    change dx to next_dx
+    change dy to next_dy
+    let head be [snake[0][0] + dx, snake[0][1] + dy]
+    if head[0] < 0 or head[0] >= cols or head[1] < 0 or head[1] >= rows or contains(snake, head)
+        change game_over to yes
+        change best to max(best, score)
+        give back nothing
+    end
+    change snake to [head] + snake
+    if head is food
+        increase score by 1
+        if score % 5 is 0 and speed > 3
+            decrease speed by 1
+        end
+        place_food()
+    otherwise
+        change snake to snake[0:length(snake) - 1]
+    end
+end
+
+to draw()
+    clear("#0d0d17")
+    # a faint checkerboard
+    color("#14142a")
+    for each y in range(0, rows)
+        for each x in range(0, cols)
+            if (x + y) % 2 is 0
+                rect(x * cell, y * cell, cell, cell)
+            end
+        end
+    end
+    color("#ff5470")
+    circle(food[0] * cell + 10, food[1] * cell + 10, 8)
+    for each i, part in snake
+        color("#b388ff" if i is 0 otherwise "#7a5fd0")
+        rect(part[0] * cell + 1, part[1] * cell + 1, cell - 2, cell - 2)
+    end
+    color("#e7e3f5")
+    text_at(8, 22, "Score: {score}   Best: {best}", 16)
+    if game_over
+        color("#000000b0")
+        rect(90, 140, 300, 80)
+        color("#ff5470")
+        text_at(150, 178, "GAME OVER", 24)
+        color("#e7e3f5")
+        text_at(120, 205, "press space to restart", 12)
+    end
+end
+
+to on_frame()
+    steer()
+    if game_over
+        if key_down("space")
+            reset_game()
+        end
+        draw()
+        give back nothing
+    end
+    increase tick by 1
+    if tick % speed is 0
+        move()
+    end
+    draw()
+end

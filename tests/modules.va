@@ -1,0 +1,59 @@
+# Module namespaces: import "x" as y, from "x" use a, b, private names.
+import "modules/geometry.va" as geo
+from "modules/geometry.va" use area, Circle, unit
+
+say geo.area(1)
+say area(2)
+say geo.unit
+say geo
+say type_of(geo)
+let c be new geo.Circle(3)
+say c
+say c.area()
+say Circle(1).area()
+say geo.double_it(5)
+assert(unit is "cm")
+
+# the module's top level is live: its functions change its own variables
+say geo.count_one()
+say geo.count_one()
+say geo.made
+
+# private names stay hidden
+attempt
+    say geo.secret
+rescue problem
+    say problem
+end
+attempt
+    say geo.helper(1)
+rescue problem
+    say problem
+end
+attempt
+    say geo.nope
+rescue problem
+    say problem
+end
+
+# a module's names don't leak into the program
+attempt
+    say helper(1)
+rescue problem
+    say problem
+end
+
+# inheriting from a type in a module
+type Ball from geo.Circle
+    to bounce()
+        give back "boing " + me.radius
+    end
+end
+let b be new Ball(2)
+say b.bounce()
+say b.area()
+say b is a geo.Circle
+
+# a module that imports another module (found next to it)
+import "modules/shapes_lib.va" as shapes
+say shapes.ring_area(2, 1)
