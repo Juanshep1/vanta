@@ -20,6 +20,21 @@ open VantaStudio.xcodeproj      # press Run (Cmd-R) in Xcode
 Requires macOS 14+, Xcode, and `python3` on the machine (the app bundles the
 Vanta interpreter and standard library and shells out to your system python3).
 
+## Vanta Studio 2
+
+A VS Code/Cursor-style layout: activity bar (Explorer, Search, Source Control,
+Run & Debug, Tests, Outline, The Vanta Book), tabbed + split editors (⌘\\),
+bottom panel (Console, Terminal, Problems, Tests, Debug), the Vee AI panel
+(⌘L) and a status bar. Open a folder (⌘O) for a file tree with live
+file-system watching, Quick Open (⌘P), Command Palette (⌘⇧P), Find in Files
+(⌘⇧F), Go to Line (⌃G) and Go to Symbol (⌘⇧O); the last folder and its tabs
+reopen on launch. The editor does incremental Vanta 6.0 highlighting, smart
+`to … end` indentation, folding, bracket/block matching, multiple cursors
+(⌘D, ⌥-click, ⌘⌥↑/↓), line moves (⌥↑/↓), ⌘/ comments, find/replace with regex,
+completions, diagnostics squiggles and breakpoints. Dark ("Vanta Night") and
+light ("Vanta Day") themes. See **ARCHITECTURE.md** for how modules plug in, and
+`--snapshot` for headless screenshots.
+
 ## What it does
 
 - **Native code editor** with Vanta syntax highlighting (NSTextView) and a

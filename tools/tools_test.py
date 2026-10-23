@@ -184,6 +184,21 @@ def test_runner_interpreter():
 
 
 @case
+def test_runner_json():
+    p = write("json_test.va", TESTS_FIXTURE)
+    code, out, _ = vanta("test", "--json", p)
+    events = [json.loads(l[len("@@vanta-json "):]) for l in out.splitlines() if l.startswith("@@vanta-json ")]
+    tests = [e for e in events if e["event"] == "test"]
+    check(code == 1 and events[-1]["event"] == "done" and events[-1]["passed"] == 1, events[-1])
+    ok = [t for t in tests if t["name"] == "adds numbers"][0]
+    check(ok["ok"] and isinstance(ok["line"], int) and ok["ms"] >= 0, ok)
+    bad = [t for t in tests if t["name"] == "a failing one"][0]
+    check(not bad["ok"] and bad["message"].startswith("line 30:"), bad)
+    code, out, _ = vanta("test", "--json", "--exact", "--filter", "adds", p)
+    check('"passed": 0' in out and '"failed": 0' in out, out)
+
+
+@case
 def test_runner_messages_for_each_expect_form():
     p = write("forms_test.va", '''test "is"
     expect 1 + 1 is 3
@@ -466,6 +481,55 @@ def debugger_session():
     check("(stopped)" in out, out)
 
 
+@case
+def debugger_json_session():
+    p = write("dbgj.va", "to square(n)\n    let result be n * n\n    give back result\nend\n\nlet total be 0\n"
+                         "let m be {\"a\": [1, 2]}\nfor each i in [1, 2, 3]\n    change total to total + square(i)\nend\n"
+                         "ask \"name?\" into who\nsay \"total is {total} {who}\"\n")
+    proc = subprocess.Popen([sys.executable, VANTA, "debug", "--json", p], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    printed = []
+
+    def send(obj):
+        proc.stdin.write(json.dumps(obj) + "\n")
+        proc.stdin.flush()
+
+    def until(event):
+        while True:
+            line = proc.stdout.readline()
+            check(line, f"stream ended waiting for {event}; output: {printed}")
+            text, mark, payload = line.partition("\x1e")
+            printed.append(text)
+            if mark:
+                msg = json.loads(payload)
+                if msg["event"] == event:
+                    return msg
+
+    until("ready")
+    send({"cmd": "setBreakpoints", "file": p, "breakpoints": [{"line": 2, "condition": "n is 2"}]})
+    send({"cmd": "start"})
+    stop = until("stopped")
+    check(stop["line"] == 2 and [f["name"] for f in stop["stack"]] == ["square", "top level"], stop)
+    send({"cmd": "evaluate", "expr": "n * 10", "frame": 0, "seq": 1})
+    check(until("response")["body"]["value"] == "20", "evaluate")
+    send({"cmd": "evaluate", "expr": "total", "frame": 1, "seq": 2})
+    check(until("response")["body"]["value"] == "1", "evaluate in caller frame")
+    send({"cmd": "scopes", "frame": 1, "seq": 3})
+    scopes = until("response")["body"]
+    send({"cmd": "variables", "ref": scopes[-1]["ref"], "seq": 4})
+    m = [v for v in until("response")["body"] if v["name"] == "m"][0]
+    send({"cmd": "variables", "ref": m["ref"], "seq": 5})
+    check(until("response")["body"][0]["value"] == "[1, 2]", "expand map")
+    send({"cmd": "stepOut"})
+    check(until("stopped")["line"] == 9, "step out to the caller")
+    send({"cmd": "setBreakpoints", "file": p, "breakpoints": []})
+    send({"cmd": "continue"})
+    send({"cmd": "input", "text": "Sam"})
+    check(until("exited")["code"] == 0, printed)
+    check("total is 14 Sam" in "".join(printed), printed)
+    proc.wait(timeout=30)
+
+
 # ---------------------------------------------------------------- language server
 
 def lsp_session(messages):
@@ -525,6 +589,56 @@ def lsp_features():
     check({"add", "length", "say", "is at least"} <= labels, "completion labels")
     check(by_id[6]["result"][0]["name"] == "add", by_id[6])
     check(by_id[7]["result"] == [] or "newText" in by_id[7]["result"][0], by_id[7])
+
+
+@case
+def lsp_navigation():
+    geo = write("lspws/geo.va", "## Area of a circle.\nto area(r: number) -> number\n    give back pi * r * r\nend\n"
+                "type Circle\n    has radius: number\n    to grow(by_amount)\n"
+                "        change me.radius to me.radius + by_amount\n    end\nend\n")
+    src = ('import "geo" as g\nfrom "geo" use area\nto add(a: number, b: number) -> number\n    let s be a + b\n'
+           '    let unused be 3\n    give back s\nend\nlet c be new g.Circle(2)\nc.grow(1)\nsay area(2) + add(1, 2)\n'
+           'say lenght("x")\n')
+    main = write("lspws/main.va", src)
+    uri, guri = "file://" + main, "file://" + geo
+
+    def req(i, method, params):
+        return {"jsonrpc": "2.0", "id": i, "method": method, "params": params}
+
+    def at(u, line, ch, **kw):
+        return dict({"textDocument": {"uri": u}, "position": {"line": line, "character": ch}}, **kw)
+    msgs = [
+        req(1, "initialize", {"rootUri": "file://" + os.path.dirname(main)}),
+        {"jsonrpc": "2.0", "method": "textDocument/didOpen",
+         "params": {"textDocument": {"uri": uri, "languageId": "vanta", "version": 1, "text": src}}},
+        req(2, "textDocument/completion", at(uri, 8, 2)),
+        req(3, "textDocument/hover", at(uri, 3, 9)),
+        req(4, "textDocument/definition", at(uri, 8, 3)),
+        req(5, "textDocument/references", at(guri, 1, 4, context={"includeDeclaration": True})),
+        req(6, "textDocument/rename", at(uri, 2, 4, newName="total")),
+        req(7, "textDocument/signatureHelp", at(uri, 9, 21)),
+        req(8, "textDocument/documentSymbol", {"textDocument": {"uri": guri}}),
+        req(9, "textDocument/rename", at(uri, 2, 4, newName="area")),
+        {"jsonrpc": "2.0", "id": 10, "method": "shutdown"},
+        {"jsonrpc": "2.0", "method": "exit"},
+    ]
+    out, code = lsp_session(msgs)
+    by_id = {m["id"]: m for m in out if "id" in m}
+    diags = [m["params"]["diagnostics"] for m in out if m.get("method") == "textDocument/publishDiagnostics"][0]
+    typo = [d for d in diags if "lenght" in d["message"]][0]
+    check(typo["range"]["start"] == {"line": 10, "character": 4} and typo["data"]["replace"] == "length", typo)
+    check(any(d["message"] == "'unused' is never used" and d["severity"] == 2 for d in diags), diags)
+    check([i["label"] for i in by_id[2]["result"]["items"]] == ["radius", "grow"], by_id[2])
+    check("let s: number" in by_id[3]["result"]["contents"]["value"], by_id[3])
+    check(by_id[4]["result"]["uri"] == guri and by_id[4]["result"]["range"]["start"]["line"] == 6, by_id[4])
+    check(len(by_id[5]["result"]) == 3 and {r["uri"] for r in by_id[5]["result"]} == {uri, guri}, by_id[5])
+    edits = by_id[6]["result"]["changes"][uri]
+    check(len(edits) == 2 and all(e["newText"] == "total" for e in edits), edits)
+    sig = by_id[7]["result"]
+    check(sig["signatures"][0]["label"].startswith("add(a: number") and sig["activeParameter"] == 1, sig)
+    circle = [s for s in by_id[8]["result"] if s["name"] == "Circle"][0]
+    check([c["name"] for c in circle["children"]] == ["radius", "grow"], circle)
+    check("already exists" in by_id[9]["error"]["message"], by_id[9])
 
 
 # ---------------------------------------------------------------- lexer

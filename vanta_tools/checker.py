@@ -54,9 +54,10 @@ class Problem(Exception):
 
 
 class Checker:
-    def __init__(self, V, path):
+    def __init__(self, V, path, source=None):
         self.V = V
         self.path = path
+        self.source = source      # unsaved text of `path` (the editor's buffer), or None to read the file
         self.problems = []
         self.funcs = {}           # name -> (params, return note, line)   top-level functions
         self.types = {}           # name -> {"fields", "setup", "parent", "methods"}
@@ -77,8 +78,11 @@ class Checker:
     # ------------------------------------------------------------------ loading
     def parse(self, path):
         V = self.V
-        with open(path, encoding="utf-8") as f:
-            src = f.read()
+        if self.source is not None and os.path.abspath(path) == os.path.abspath(self.path):
+            src = self.source
+        else:
+            with open(path, encoding="utf-8") as f:
+                src = f.read()
         V.TYPE_NOTES.clear()
         saved = V.CURRENT_FILE
         V.CURRENT_FILE = os.path.abspath(path)
@@ -93,7 +97,7 @@ class Checker:
         try:
             return os.path.abspath(self.V.resolve_import(name, from_dir))
         except self.V.VantaError:
-            return None
+            return find_above(name, from_dir)
 
     def module_names(self, path, seen=None):
         """Top-level names a file defines, including what its plain imports define."""
@@ -695,6 +699,13 @@ def check_file(V, path):
     return Checker(V, path).run()
 
 
+def check_source(V, text, path):
+    """[(line, message)] for unsaved text that belongs at `path` (imports resolve next to it)."""
+    global _PATTERN_NAMES
+    _PATTERN_NAMES = V.pattern_names
+    return Checker(V, path, source=text).run()
+
+
 def main(V, args):
     if not args:
         print("Usage: vanta check FILES")
@@ -714,3 +725,15 @@ def main(V, args):
             print(f"{path}: no problems found")
         total += len(problems)
     return 1 if total else 0
+
+
+def find_above(name, from_dir):
+    """A path written relative to a project root (`import "examples/x.va"` run from the
+    repo root): look in each folder above the importing file."""
+    d = os.path.abspath(from_dir) if from_dir else None
+    while d and d != os.path.dirname(d):
+        for cand in (os.path.join(d, name), os.path.join(d, name + ".va")):
+            if os.path.isfile(cand):
+                return os.path.abspath(cand)
+        d = os.path.dirname(d)
+    return None

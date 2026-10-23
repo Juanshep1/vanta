@@ -1,0 +1,191 @@
+# Standard library: more text helpers.   import "strings"
+#
+# words(text)                     the words, split on any run of spaces/tabs/newlines
+# center(text, width, [fill])     text centred in a field of width characters
+# wrap(text, width)               a list of lines, none longer than width (long words stay whole)
+# truncate(text, width, [tail])   cut to width characters, ending with tail ("..." by default)
+# indent(text, [prefix])          every line starts with prefix (4 spaces by default)
+# dedent(text)                    the common leading spaces removed from every line
+# is_blank(text)                  only whitespace (or empty)?
+# is_digits(text) / is_letters(text)    every character a digit / a letter (and not empty)?
+# reverse_text(text)              the characters in reverse order
+# count_of(text, piece)           how many times piece appears (not overlapping)
+# between(text, start, finish)    the text between the first start and the next finish (or nothing)
+# strip_prefix(text, prefix) / strip_suffix(text, suffix)
+# squeeze(text)                   runs of whitespace become one space, ends trimmed
+# snake_case / kebab_case / camel_case(text)    "Hello big World" -> hello_big_world / hello-big-world / helloBigWorld
+# slugify(text)                   lowercase letters, digits and dashes: "Hello, World!" -> "hello-world"
+# fill_template(text, values)     "Hi {name}" with {"name": "Ana"} -> "Hi Ana" (unknown {keys} stay as they are)
+
+to words(t)
+    give back find_all(t, "[^ \t\n\r]+")
+end
+
+to center(t, width, fill be " ")
+    let s be text(t)
+    let gap be width - length(s)
+    if gap <= 0
+        give back s
+    end
+    let left be floor(gap / 2)
+    give back repeat_text(fill, left) + s + repeat_text(fill, gap - left)
+end
+
+to wrap(t, width)
+    let out be []
+    for each para in split(text(t), "\n")
+        let line be ""
+        for each w in words(para)
+            if line is ""
+                change line to w
+            otherwise if length(line) + 1 + length(w) <= width
+                change line to line + " " + w
+            otherwise
+                add line to out
+                change line to w
+            end
+        end
+        add line to out
+    end
+    give back out
+end
+
+to truncate(t, width, tail be "...")
+    let s be text(t)
+    if length(s) <= width
+        give back s
+    end
+    if width <= length(tail)
+        give back s[0:width]
+    end
+    give back s[0:width - length(tail)] + tail
+end
+
+to indent(t, prefix be "    ")
+    give back join([prefix + line for each line in split(text(t), "\n")], "\n")
+end
+
+to dedent(t)
+    let all be split(text(t), "\n")
+    let least be -1
+    for each line in all
+        if trim(line) is not ""
+            let spaces be length(find_all(line, "^ *")[0])
+            if least < 0 or spaces < least
+                change least to spaces
+            end
+        end
+    end
+    if least <= 0
+        give back text(t)
+    end
+    give back join([line[least:] if length(line) >= least otherwise trim(line) for each line in all], "\n")
+end
+
+to is_blank(t)
+    give back trim(text(t)) is ""
+end
+
+to is_digits(t)
+    give back matches(text(t), "^[0-9]+$")
+end
+
+to is_letters(t)
+    let s be text(t)
+    if s is ""
+        give back no
+    end
+    for each ch in s
+        if lowercase(ch) is uppercase(ch)
+            give back no
+        end
+    end
+    give back yes
+end
+
+to reverse_text(t)
+    give back join(reverse(split_chars(text(t))), "")
+end
+
+to split_chars(s)
+    give back [ch for each ch in s]
+end
+
+to count_of(t, piece)
+    if piece is ""
+        give back 0
+    end
+    give back length(split(text(t), piece)) - 1
+end
+
+to between(t, start, finish)
+    let s be text(t)
+    let i be find(s, start)
+    if i < 0
+        give back nothing
+    end
+    let rest be s[i + length(start):]
+    let j be find(rest, finish)
+    if j < 0
+        give back nothing
+    end
+    give back rest[0:j]
+end
+
+to strip_prefix(t, prefix)
+    let s be text(t)
+    if starts_with(s, prefix)
+        give back s[length(prefix):]
+    end
+    give back s
+end
+
+to strip_suffix(t, suffix)
+    let s be text(t)
+    if suffix is not "" and ends_with(s, suffix)
+        give back s[0:length(s) - length(suffix)]
+    end
+    give back s
+end
+
+to squeeze(t)
+    give back join(words(t), " ")
+end
+
+to _word_parts(t)
+    # split on spaces, dashes, underscores and lowercase->Uppercase boundaries
+    let spaced be replace_all(text(t), "([a-z0-9])([A-Z])", "\\1 \\2")
+    give back [lowercase(w) for each w in find_all(spaced, "[A-Za-z0-9]+")]
+end
+
+to snake_case(t)
+    give back join(_word_parts(t), "_")
+end
+
+to kebab_case(t)
+    give back join(_word_parts(t), "-")
+end
+
+to camel_case(t)
+    let parts be _word_parts(t)
+    if length(parts) is 0
+        give back ""
+    end
+    let out be parts[0]
+    for each p in parts[1:]
+        change out to out + capitalize(p)
+    end
+    give back out
+end
+
+to slugify(t)
+    give back join(find_all(lowercase(text(t)), "[a-z0-9]+"), "-")
+end
+
+to fill_template(t, values)
+    let out be text(t)
+    for each k, v in values
+        change out to replace(out, "{{" + k + "}}", text(v))
+    end
+    give back out
+end

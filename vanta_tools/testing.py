@@ -66,8 +66,9 @@ def discover(targets):
 
 
 class Result:
-    def __init__(self, name, ok, ms, message="", output=""):
+    def __init__(self, name, ok, ms, message="", output="", line=None):
         self.name, self.ok, self.ms, self.message, self.output = name, ok, ms, message, output
+        self.line = line                # the `test "..."` line (1-based), None for a plain file
 
 
 def run_file(V, path, name_filter=None):
@@ -105,7 +106,7 @@ def run_file(V, path, name_filter=None):
         return [], f"the code outside the tests failed: {e}" + (f"\n{buf.getvalue()}" if buf.getvalue() else "")
     for t in tests:
         _, lineno, name, body = t
-        if name_filter and name_filter.lower() not in name.lower():
+        if not _wanted(name, name_filter):
             continue
         out = io.StringIO()
         t0 = time.perf_counter()
@@ -120,8 +121,19 @@ def run_file(V, path, name_filter=None):
             ok, msg = False, "'stop'/'skip' used outside a loop"
         except RecursionError:
             ok, msg = False, "too much recursion (a function that never stops calling itself?)"
-        results.append(Result(name, ok, (time.perf_counter() - t0) * 1000, msg, out.getvalue()))
+        results.append(Result(name, ok, (time.perf_counter() - t0) * 1000, msg, out.getvalue(), lineno))
     return results, None
+
+
+EXACT = False                           # --exact: the filter must match a test's whole name
+
+
+def _wanted(name, name_filter):
+    if not name_filter:
+        return True
+    if EXACT:
+        return name == name_filter
+    return name_filter.lower() in name.lower()
 
 
 # ----------------------------------------------------------------- native tests
@@ -244,7 +256,7 @@ def native_program(V, path, name_filter=None):
             out.append(s)
             continue
         _, lineno, name, body = s
-        if name_filter and name_filter.lower() not in name.lower():
+        if not _wanted(name, name_filter):
             continue
         fname = f"__vanta_test_{len(calls)}"
         out.append(("func", lineno, fname, [], body))
@@ -313,8 +325,9 @@ def run_file_native(V, path, name_filter=None):
 # ----------------------------------------------------------------- command
 
 def main(V, args):
-    """vanta test [files or folders] [--native] [-v] [--filter TEXT]"""
-    native, verbose, name_filter, targets = False, False, None, []
+    """vanta test [files or folders] [--native] [-v] [--filter TEXT] [--exact] [--json]"""
+    global EXACT
+    native, verbose, name_filter, targets, as_json = False, False, None, [], False
     color = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
     i = 0
     while i < len(args):
@@ -328,9 +341,15 @@ def main(V, args):
             name_filter = args[i] if i < len(args) else None
         elif a == "--no-color":
             color = False
+        elif a == "--exact":
+            EXACT = True
+        elif a == "--json":
+            as_json = True
         else:
             targets.append(a)
         i += 1
+    if as_json:
+        return _main_json(V, targets, native, name_filter)
     c = _color(color)
     try:
         files = discover(targets)
@@ -370,4 +389,44 @@ def main(V, args):
     shown = f"{total_ms:.0f} ms" if total_ms < 10000 else f"{total_ms / 1000:.1f} s"
     col = c['g'] if not (failed or errors) else c['r']
     print(f"\n{col}{summary}{c['x']} in {shown} ({len(files)} file{'s' if len(files) != 1 else ''})")
+    return 1 if (failed or errors) else 0
+
+
+def _main_json(V, targets, native, name_filter):
+    """--json: one line per event, each starting with "@@vanta-json " (for editors):
+        {"event": "test", "file", "name", "line", "ok", "ms", "message", "output"}
+        {"event": "error", "file", "message"}          the file couldn't run
+        {"event": "done", "passed", "failed", "errors", "ms"}"""
+    import json
+
+    def emit(obj):
+        sys.stdout.write("@@vanta-json " + json.dumps(obj) + "\n")
+        sys.stdout.flush()
+    try:
+        files = discover(targets)
+    except FileNotFoundError as e:
+        emit({"event": "error", "file": str(e), "message": f"no such file or folder: {e}"})
+        emit({"event": "done", "passed": 0, "failed": 0, "errors": 1, "ms": 0})
+        return 1
+    passed = failed = errors = 0
+    t_start = time.perf_counter()
+    for path in files:
+        emit({"event": "file", "file": os.path.abspath(path)})
+        try:
+            if native:
+                results, file_error = run_file_native(V, path, name_filter)
+            else:
+                results, file_error = run_file(V, path, name_filter)
+        except Exception as e:                       # a crash in one file doesn't hide the others
+            results, file_error = [], f"{type(e).__name__}: {e}"
+        for r in results:
+            passed += r.ok
+            failed += not r.ok
+            emit({"event": "test", "file": os.path.abspath(path), "name": r.name, "line": getattr(r, "line", None),
+                  "ok": r.ok, "ms": round(r.ms, 2), "message": r.message, "output": r.output})
+        if file_error:
+            errors += 1
+            emit({"event": "error", "file": os.path.abspath(path), "message": file_error})
+    emit({"event": "done", "passed": passed, "failed": failed, "errors": errors,
+          "ms": round((time.perf_counter() - t_start) * 1000, 1)})
     return 1 if (failed or errors) else 0

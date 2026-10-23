@@ -1,0 +1,135 @@
+# Standard library: command-line arguments.   import "cli"
+#
+# parse_args(args, spec) reads options from a list of words (usually arguments()) using a spec map of
+# option name -> default value. The default's kind decides how an option is read:
+#     yes/no        a flag:  --verbose  turns it on,  --no-verbose  turns it off
+#     a number      --count 3  or  --count=3  (checked to be a number)
+#     text          --name Ana  or  --name=Ana
+# Every option also has a one-letter form made from its first letter (-v, -c) when no other option starts with
+# that letter. Words that aren't options are collected, in order, under "args"; everything after -- is an arg.
+# --help / -h sets "help" to yes. An unknown option, or one missing its value, is an error you can rescue.
+#
+#     let opts be parse_args(arguments(), {"verbose": no, "count": 1, "name": "World"})
+#     if opts["help"]
+#         say arg_usage("greet", {"verbose": no, "count": 1, "name": "World"})
+#     end
+#
+# arg_usage(program, spec) gives a help text listing every option with its default.
+
+to _cli_short(spec, letter)
+    let found be nothing
+    for each name in keys(spec)
+        if name[0] is letter
+            if found is not nothing
+                give back nothing
+            end
+            change found to name
+        end
+    end
+    give back found
+end
+
+to _cli_value(name, default, raw)
+    if is_number(default)
+        let n be number(raw)
+        if not is_number(n)
+            fail("--" + name + " needs a number, not '" + raw + "'")
+        end
+        give back n
+    end
+    give back raw
+end
+
+to parse_args(args, spec)
+    let result be {}
+    for each name, default in spec
+        change result[name] to default
+    end
+    change result["args"] to []
+    if not has_key(spec, "help")
+        change result["help"] to no
+    end
+    let i be 0
+    let rest_are_args be no
+    while i < length(args)
+        let word be text(args[i])
+        change i to i + 1
+        if rest_are_args or word is "-" or not starts_with(word, "-")
+            add word to result["args"]
+            skip
+        end
+        if word is "--"
+            change rest_are_args to yes
+            skip
+        end
+        if (word is "--help" or word is "-h") and not has_key(spec, "help")
+            change result["help"] to yes
+            skip
+        end
+        let name be ""
+        let value be nothing
+        if starts_with(word, "--")
+            change name to word[2:]
+            let eq be find(name, "=")
+            if eq >= 0
+                change value to name[eq + 1:]
+                change name to name[0:eq]
+            end
+        otherwise
+            if length(word) is not 2
+                fail("unknown option " + word)
+            end
+            let long be _cli_short(spec, word[1])
+            if long is nothing
+                fail("unknown option " + word)
+            end
+            change name to long
+        end
+        if not has_key(spec, name)
+            if starts_with(name, "no-") and has_key(spec, name[3:]) and is_a_flag(spec[name[3:]]) and value is nothing
+                change result[name[3:]] to no
+                skip
+            end
+            fail("unknown option --" + name)
+        end
+        let default be spec[name]
+        if is_a_flag(default)
+            if value is nothing
+                change result[name] to yes
+            otherwise
+                change result[name] to contains(["yes", "true", "1", "on"], lowercase(value))
+            end
+            skip
+        end
+        if value is nothing
+            if i >= length(args)
+                fail("--" + name + " needs a value")
+            end
+            change value to text(args[i])
+            change i to i + 1
+        end
+        change result[name] to _cli_value(name, default, value)
+    end
+    give back result
+end
+
+to is_a_flag(v)
+    give back type_of(v) is "yes-no"
+end
+
+to arg_usage(program, spec)
+    let out be ["usage: " + program + " [options] [args]", "", "options:"]
+    for each name, default in spec
+        let short be ""
+        if _cli_short(spec, name[0]) is name
+            change short to "-" + name[0] + ", "
+        end
+        if is_a_flag(default)
+            add "  " + short + "--" + name + "  (default: " + text(default) + "; --no-" + name + " turns it off)" to out
+        otherwise
+            add "  " + short + "--" + name + " VALUE  (default: " + text(default) + ")" to out
+        end
+    end
+    add "  -h, --help  show this help" to out
+    give back join(out, "\n")
+end
