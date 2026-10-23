@@ -1245,6 +1245,9 @@ def _parse_pattern(p, top):
         if all(pv[0] == "pat_value" for _, pv in pairs):
             return ("pat_value", ("map", [(kn, pv[1]) for kn, pv in pairs]))
         return ("pat_map", pairs)
+    if top and k == "NAME" and v == "_" and nxt[0] == "END":   # when _  (catch-all)
+        p.take()
+        return ("pat_any",)
     if not top and k == "NAME" and v not in _LITERAL_WORDS and nxt[0] in ("COMMA", "RB", "RC", "END"):
         p.take()
         return ("pat_any",) if v == "_" else ("pat_bind", v)
